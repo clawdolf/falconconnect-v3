@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 
 const STATE_MAP = {
   'Alabama': 'AL', 'Alaska': 'AK', 'Arizona': 'AZ', 'Arkansas': 'AR', 'California': 'CA',
@@ -15,6 +15,104 @@ const STATE_MAP = {
 }
 const STATE_NAMES = Object.keys(STATE_MAP)
 
+/* ── State autocomplete input ── */
+function StateInput({ value, onChange, onSelect }) {
+  const [query, setQuery] = useState(value || '')
+  const [suggestions, setSuggestions] = useState([])
+  const [open, setOpen] = useState(false)
+  const [highlighted, setHighlighted] = useState(0)
+  const wrapRef = useRef(null)
+
+  // Sync external value reset
+  useEffect(() => { if (!value) { setQuery(''); setSuggestions([]) } }, [value])
+
+  const handleChange = (e) => {
+    const q = e.target.value
+    setQuery(q)
+    if (q.length < 1) { setSuggestions([]); setOpen(false); onChange('', ''); return }
+    const lq = q.toLowerCase()
+    const matches = STATE_NAMES.filter(s =>
+      s.toLowerCase().startsWith(lq) || STATE_MAP[s].toLowerCase().startsWith(lq)
+    ).slice(0, 8)
+    setSuggestions(matches)
+    setOpen(matches.length > 0)
+    setHighlighted(0)
+    // If user typed exact abbrev match, auto-resolve
+    const exactAbbr = STATE_NAMES.find(s => STATE_MAP[s].toLowerCase() === lq)
+    if (exactAbbr) { onChange(exactAbbr, STATE_MAP[exactAbbr]); return }
+    onChange('', '')
+  }
+
+  const pick = (state) => {
+    setQuery(state)
+    setSuggestions([])
+    setOpen(false)
+    onSelect(state, STATE_MAP[state])
+    onChange(state, STATE_MAP[state])
+  }
+
+  const handleKeyDown = (e) => {
+    if (!open) return
+    if (e.key === 'ArrowDown') { e.preventDefault(); setHighlighted(h => Math.min(h + 1, suggestions.length - 1)) }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setHighlighted(h => Math.max(h - 1, 0)) }
+    else if (e.key === 'Enter') { e.preventDefault(); if (suggestions[highlighted]) pick(suggestions[highlighted]) }
+    else if (e.key === 'Escape') { setOpen(false) }
+  }
+
+  // Close on outside click
+  useEffect(() => {
+    const handler = (e) => { if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false) }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  return (
+    <div ref={wrapRef} style={{ position: 'relative' }}>
+      <input
+        className="form-input"
+        type="text"
+        placeholder="Start typing a state..."
+        value={query}
+        onChange={handleChange}
+        onKeyDown={handleKeyDown}
+        onFocus={() => { if (suggestions.length > 0) setOpen(true) }}
+        autoComplete="off"
+      />
+      {open && (
+        <div style={{
+          position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 50,
+          background: 'var(--surface)', border: '1px solid var(--border)',
+          borderRadius: 2, boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+          maxHeight: 240, overflowY: 'auto',
+        }}>
+          {suggestions.map((s, i) => (
+            <div
+              key={s}
+              onMouseDown={() => pick(s)}
+              style={{
+                padding: '0.5rem 0.75rem',
+                cursor: 'pointer',
+                fontFamily: 'var(--font-mono)',
+                fontSize: '0.8rem',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                background: i === highlighted ? 'var(--bg)' : 'transparent',
+                color: 'var(--text)',
+              }}
+              onMouseEnter={() => setHighlighted(i)}
+            >
+              <span>{s}</span>
+              <span style={{ color: 'var(--accent)', fontWeight: 600, fontSize: '0.75rem' }}>{STATE_MAP[s]}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* ── Main Component ── */
 function Licenses() {
   const [licenses, setLicenses] = useState([])
   const [loading, setLoading] = useState(true)
@@ -24,11 +122,10 @@ function Licenses() {
   const [deleteConfirm, setDeleteConfirm] = useState(null)
   const [submitting, setSubmitting] = useState(false)
 
-  const blankForm = { state: '', license_number: '' }
+  const blankForm = { state: '', state_abbreviation: '', license_number: '' }
   const [formData, setFormData] = useState(blankForm)
   const [editData, setEditData] = useState({})
 
-  // Auth (Clerk optional)
   let getToken = null
   try { const { useAuth } = require('@clerk/clerk-react'); const auth = useAuth(); getToken = auth.getToken } catch { /* no-op */ }
 
@@ -58,7 +155,7 @@ function Licenses() {
       const headers = await getHeaders()
       const body = {
         state: formData.state,
-        state_abbreviation: STATE_MAP[formData.state] || '',
+        state_abbreviation: formData.state_abbreviation,
         license_number: formData.license_number || null,
         license_type: 'insurance_producer',
       }
@@ -75,7 +172,7 @@ function Licenses() {
       const headers = await getHeaders()
       const body = {
         state: editData.state,
-        state_abbreviation: STATE_MAP[editData.state] || editData.state_abbreviation || '',
+        state_abbreviation: editData.state_abbreviation || STATE_MAP[editData.state] || '',
         license_number: editData.license_number || null,
       }
       const resp = await fetch(`/api/licenses/${id}`, { method: 'PUT', headers, body: JSON.stringify(body) })
@@ -131,13 +228,16 @@ function Licenses() {
                 <tbody>
                   {licenses.map((lic) => (
                     <tr key={lic.id}>
-                      <td>{lic.state_abbreviation} <span style={{ color: 'var(--text-muted)', fontSize: '0.7rem' }}>{lic.state}</span></td>
+                      <td>
+                        <span style={{ fontWeight: 600 }}>{lic.state_abbreviation}</span>
+                        <span style={{ color: 'var(--text-muted)', fontSize: '0.7rem', marginLeft: '0.4rem' }}>{lic.state}</span>
+                      </td>
                       <td>{lic.license_number || '—'}</td>
                       <td><span className={`badge ${statusBadge(lic.status)}`}>{lic.status}</span></td>
                       <td>
-                        {lic.verify_url ? (
-                          <a href={lic.verify_url} target="_blank" rel="noopener noreferrer" className="c-accent" style={{ fontFamily: 'var(--font-mono)', fontSize: '0.75rem' }}>Verify</a>
-                        ) : <span className="c-muted">—</span>}
+                        {lic.verify_url
+                          ? <a href={lic.verify_url} target="_blank" rel="noopener noreferrer" className="c-accent" style={{ fontFamily: 'var(--font-mono)', fontSize: '0.75rem' }}>Verify</a>
+                          : <span className="c-muted">—</span>}
                       </td>
                       <td>
                         <button className="btn btn-sm" onClick={() => startEdit(lic)} disabled={submitting}>Edit</button>
@@ -161,18 +261,19 @@ function Licenses() {
                 <div className="form-grid">
                   <div className="form-field">
                     <label className="form-label">State</label>
-                    <select className="form-input" value={editData.state || ''} onChange={e => setEditData({ ...editData, state: e.target.value, state_abbreviation: STATE_MAP[e.target.value] || '' })}>
-                      <option value="">Select state...</option>
-                      {STATE_NAMES.map(s => <option key={s} value={s}>{s} ({STATE_MAP[s]})</option>)}
-                    </select>
+                    <StateInput
+                      value={editData.state}
+                      onChange={(state, abbr) => setEditData(d => ({ ...d, state, state_abbreviation: abbr }))}
+                      onSelect={(state, abbr) => setEditData(d => ({ ...d, state, state_abbreviation: abbr }))}
+                    />
                   </div>
                   <div className="form-field">
                     <label className="form-label">Abbreviation</label>
-                    <input className="form-input" type="text" value={editData.state ? STATE_MAP[editData.state] || '' : ''} readOnly style={{ opacity: 0.6, cursor: 'default' }} />
+                    <input className="form-input" type="text" value={editData.state_abbreviation || ''} readOnly style={{ opacity: 0.6, cursor: 'default' }} />
                   </div>
                   <div className="form-field">
                     <label className="form-label">License #</label>
-                    <input className="form-input" type="text" placeholder="Optional" value={editData.license_number || ''} onChange={e => setEditData({ ...editData, license_number: e.target.value })} />
+                    <input className="form-input" type="text" placeholder="Optional" value={editData.license_number || ''} onChange={e => setEditData(d => ({ ...d, license_number: e.target.value }))} />
                   </div>
                 </div>
                 <div style={{ marginTop: '0.75rem', display: 'flex', gap: '0.5rem' }}>
@@ -196,22 +297,23 @@ function Licenses() {
                 <div className="form-grid">
                   <div className="form-field">
                     <label className="form-label">State</label>
-                    <select className="form-input" value={formData.state} onChange={e => setFormData({ ...formData, state: e.target.value })}>
-                      <option value="">Select state...</option>
-                      {STATE_NAMES.map(s => <option key={s} value={s}>{s} ({STATE_MAP[s]})</option>)}
-                    </select>
+                    <StateInput
+                      value={formData.state}
+                      onChange={(state, abbr) => setFormData(d => ({ ...d, state, state_abbreviation: abbr }))}
+                      onSelect={(state, abbr) => setFormData(d => ({ ...d, state, state_abbreviation: abbr }))}
+                    />
                   </div>
                   <div className="form-field">
                     <label className="form-label">Abbreviation</label>
-                    <input className="form-input" type="text" value={formData.state ? STATE_MAP[formData.state] || '' : ''} readOnly style={{ opacity: 0.6, cursor: 'default' }} />
+                    <input className="form-input" type="text" value={formData.state_abbreviation || ''} readOnly style={{ opacity: 0.6, cursor: 'default' }} />
                   </div>
                   <div className="form-field">
                     <label className="form-label">License #</label>
-                    <input className="form-input" type="text" placeholder="Optional" value={formData.license_number} onChange={e => setFormData({ ...formData, license_number: e.target.value })} />
+                    <input className="form-input" type="text" placeholder="Optional" value={formData.license_number} onChange={e => setFormData(d => ({ ...d, license_number: e.target.value }))} />
                   </div>
                 </div>
                 <div style={{ marginTop: '0.75rem', display: 'flex', gap: '0.5rem' }}>
-                  <button className="btn btn-primary" onClick={handleAdd} disabled={submitting}>{submitting ? 'Adding...' : 'Submit'}</button>
+                  <button className="btn btn-primary" onClick={handleAdd} disabled={submitting || !formData.state}>{submitting ? 'Adding...' : 'Submit'}</button>
                   <button className="btn" onClick={() => { setShowAddForm(false); setFormData(blankForm); setError(null) }}>Cancel</button>
                 </div>
               </div>
