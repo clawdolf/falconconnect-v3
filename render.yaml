@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: falconconnect-v3
+    runtime: python
+    buildCommand: pip install -r requirements.txt && alembic upgrade head
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: falconconnect-v3-db
+          property: connectionString
+      - key: PYTHON_VERSION
+        value: "3.12"
+
+databases:
+  - name: falconconnect-v3-db
+    plan: starter

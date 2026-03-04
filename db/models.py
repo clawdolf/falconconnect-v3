@@ -1,0 +1,87 @@
+"""ORM models — all tables live here."""
+
+from datetime import datetime, date
+
+from sqlalchemy import (
+    Column,
+    DateTime,
+    Date,
+    Float,
+    Integer,
+    String,
+    Text,
+    func,
+)
+from sqlalchemy.orm import DeclarativeBase
+
+
+class Base(DeclarativeBase):
+    pass
+
+
+class LeadXref(Base):
+    """Maps GHL contact ID ↔ Notion page ID ↔ phone for cross-system lookups."""
+
+    __tablename__ = "lead_xref"
+
+    id: int = Column(Integer, primary_key=True, autoincrement=True)
+    ghl_contact_id: str = Column(String(64), unique=True, nullable=False, index=True)
+    notion_page_id: str = Column(String(64), unique=True, nullable=False, index=True)
+    phone: str = Column(String(20), nullable=False, index=True)
+    first_name: str = Column(String(128), nullable=True)
+    last_name: str = Column(String(128), nullable=True)
+    created_at: datetime = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at: datetime = Column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class SyncLog(Base):
+    """Audit log for every GHL ↔ Notion sync event."""
+
+    __tablename__ = "sync_log"
+
+    id: int = Column(Integer, primary_key=True, autoincrement=True)
+    event_type: str = Column(String(64), nullable=False, index=True)
+    direction: str = Column(String(16), nullable=False)  # ghl_to_notion | notion_to_ghl
+    source_id: str = Column(String(128), nullable=True)
+    target_id: str = Column(String(128), nullable=True)
+    payload: str = Column(Text, nullable=True)
+    status: str = Column(String(16), nullable=False, default="ok")  # ok | error
+    error_detail: str = Column(Text, nullable=True)
+    created_at: datetime = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class IssuedPaid(Base):
+    """Carrier commission deposits from Plaid (Phase 2)."""
+
+    __tablename__ = "issued_paid"
+
+    id: int = Column(Integer, primary_key=True, autoincrement=True)
+    carrier: str = Column(String(128), nullable=False)
+    amount: float = Column(Float, nullable=False)
+    transaction_date: date = Column(Date, nullable=False)
+    plaid_transaction_id: str = Column(String(128), unique=True, nullable=True)
+    description: str = Column(Text, nullable=True)
+    created_at: datetime = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class AnalyticsDaily(Base):
+    """Daily production metrics — dials, contacts, appts, closes."""
+
+    __tablename__ = "analytics_daily"
+
+    id: int = Column(Integer, primary_key=True, autoincrement=True)
+    date: date = Column(Date, nullable=False, unique=True, index=True)
+    dials: int = Column(Integer, default=0)
+    contacts: int = Column(Integer, default=0)
+    appointments_set: int = Column(Integer, default=0)
+    appointments_kept: int = Column(Integer, default=0)
+    closes: int = Column(Integer, default=0)
+    premium_submitted: float = Column(Float, default=0.0)
+    premium_issued: float = Column(Float, default=0.0)
+    notes: str = Column(Text, nullable=True)
+    created_at: datetime = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at: datetime = Column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )

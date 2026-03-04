@@ -1,0 +1,13 @@
+fastapi
+uvicorn[standard]
+httpx
+sqlalchemy[asyncio]
+asyncpg
+alembic
+pydantic
+pydantic-settings
+python-dotenv
+icalendar
+pytz
+notion-client
+python-dateutil
