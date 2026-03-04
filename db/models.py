@@ -88,6 +88,52 @@ class AnalyticsDaily(Base):
     )
 
 
+class DBAgent(Base):
+    """Agent profiles — drives FalconVerify consumer portal dynamically."""
+
+    __tablename__ = "agents"
+
+    id: int = Column(Integer, primary_key=True, autoincrement=True)
+    user_id: str = Column(String(128), unique=True, nullable=False, index=True)
+    slug: str = Column(String(64), unique=True, nullable=False, index=True)
+    name: str = Column(String(256), nullable=False)
+    title: str = Column(String(256), nullable=True)
+    bio: str = Column(Text, nullable=True)
+    photo_url: str = Column(String(512), nullable=True)
+    phone: str = Column(String(20), nullable=True)
+    phone_display: str = Column(String(20), nullable=True)
+    email: str = Column(String(256), nullable=True)
+    calendar_url: str = Column(String(512), nullable=True)
+    npn: str = Column(String(20), nullable=True)
+    location: str = Column(String(256), nullable=True)
+    carrier_count: int = Column(Integer, default=47)
+    carriers_json: str = Column(Text, nullable=True)
+    is_active: bool = Column(Boolean, default=True)
+    created_at: datetime = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at: datetime = Column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class DBTestimonial(Base):
+    """Client testimonials for agent profiles."""
+
+    __tablename__ = "testimonials"
+
+    id: int = Column(Integer, primary_key=True, autoincrement=True)
+    agent_id: int = Column(Integer, nullable=False, index=True)
+    client_name: str = Column(String(128), nullable=False)
+    text: str = Column(Text, nullable=False)
+    rating: int = Column(Integer, default=5)
+    date: date = Column(Date, nullable=True)
+    is_published: bool = Column(Boolean, default=True)
+    sort_order: int = Column(Integer, default=0)
+    created_at: datetime = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at: datetime = Column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
 class DBLicense(Base):
     """Agent license records — used by FalconVerify consumer portal.
 
