@@ -8,6 +8,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.database import get_session
+from middleware.auth import require_auth
 
 logger = logging.getLogger("falconconnect.admin")
 
@@ -16,18 +17,18 @@ router = APIRouter()
 
 @router.get("/health")
 async def health_check():
-    """Basic liveness probe — returns 200 if the app is running."""
+    """Basic liveness probe — returns 200 if the app is running. Public."""
     return {
         "status": "healthy",
         "service": "FalconConnect v3",
-        "version": "3.0.0",
+        "version": "3.1.0",
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
 
 @router.get("/health/db")
 async def db_health(session: AsyncSession = Depends(get_session)):
-    """Database connectivity check — runs a simple query."""
+    """Database connectivity check — runs a simple query. Public."""
     try:
         result = await session.execute(text("SELECT 1"))
         result.scalar()
@@ -48,9 +49,15 @@ async def db_health(session: AsyncSession = Depends(get_session)):
 
 @router.get("/version")
 async def version():
-    """Return the current application version."""
+    """Return the current application version. Public."""
     return {
         "service": "FalconConnect",
-        "version": "3.0.0",
-        "codename": "middleware-rebuild",
+        "version": "3.1.0",
+        "codename": "clerk-auth",
     }
+
+
+@router.get("/me")
+async def me(user=Depends(require_auth)):
+    """Return the authenticated user's Clerk profile. Requires auth."""
+    return {"user": user}

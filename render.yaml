@@ -11,6 +11,10 @@ services:
           property: connectionString
       - key: PYTHON_VERSION
         value: "3.12"
+      - key: CLERK_SECRET_KEY
+        sync: false
+      - key: CLERK_PUBLISHABLE_KEY
+        sync: false
 
 databases:
   - name: falconconnect-v3-db

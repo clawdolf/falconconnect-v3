@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.database import get_session
 from db.models import AnalyticsDaily
+from middleware.auth import require_auth
 
 logger = logging.getLogger("falconconnect.analytics")
 
@@ -22,6 +23,7 @@ async def get_daily_analytics(
     end: Optional[date] = Query(None, description="End date (YYYY-MM-DD)"),
     days: int = Query(30, ge=1, le=365, description="Number of days to look back"),
     session: AsyncSession = Depends(get_session),
+    user=Depends(require_auth),
 ):
     """Get daily production metrics for a date range.
 
@@ -66,6 +68,7 @@ async def get_daily_analytics(
 async def get_summary(
     days: int = Query(30, ge=1, le=365),
     session: AsyncSession = Depends(get_session),
+    user=Depends(require_auth),
 ):
     """Aggregated production summary for the last N days.
 
