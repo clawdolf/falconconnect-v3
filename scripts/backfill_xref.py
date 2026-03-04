@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
 """Backfill lead_xref table by matching GHL contacts to Notion pages by phone.
 
+Loads ALL Notion pages into memory first (one paginated fetch ~60 API calls),
+then loops GHL contacts doing dict lookups — no API calls in the inner loop.
+
 Usage:
-    python3 scripts/backfill_xref.py --dry-run   # preview what would be inserted
-    python3 scripts/backfill_xref.py              # actually insert rows
+    python3 scripts/backfill_xref.py --dry-run                          # preview
+    python3 scripts/backfill_xref.py --dry-run --output /tmp/preview.csv # preview + CSV
+    python3 scripts/backfill_xref.py                                     # actually insert rows
 
 Reads DATABASE_URL, GHL_API_KEY, GHL_LOCATION_ID, NOTION_TOKEN, and
 NOTION_LEADS_DB_ID from .env in the project root.
@@ -11,12 +15,14 @@ NOTION_LEADS_DB_ID from .env in the project root.
 
 import argparse
 import asyncio
+import csv
 import logging
 import os
 import re
 import sys
+import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import httpx
 from dotenv import load_dotenv
@@ -45,25 +51,20 @@ logger = logging.getLogger("backfill_xref")
 
 
 def normalize_phone(raw: str) -> str:
-    """Strip to digits only (no +, no dashes). Returns 10 digits for US numbers."""
+    """Strip to digits, keep last 10, prefix with +1.
+
+    Returns E.164 (+1XXXXXXXXXX) or empty string.
+    """
     if not raw:
         return ""
     digits = re.sub(r"[^\d]", "", raw.strip())
-    if len(digits) == 11 and digits.startswith("1"):
-        return digits[1:]  # strip leading 1
-    if len(digits) == 10:
-        return digits
-    return digits  # return whatever we have
-
-
-def normalize_phone_e164(raw: str) -> str:
-    """Normalize to E.164 (+1XXXXXXXXXX) for storage."""
-    digits = normalize_phone(raw)
-    if len(digits) == 10:
-        return f"+1{digits}"
-    if len(digits) == 11 and digits.startswith("1"):
-        return f"+{digits}"
-    return f"+{digits}" if digits else ""
+    if not digits:
+        return ""
+    # Keep last 10 digits (handles +1, 1-prefix, or raw 10)
+    if len(digits) >= 10:
+        last10 = digits[-10:]
+        return f"+1{last10}"
+    return ""  # too short to be a US number
 
 
 # -- GHL helpers --
@@ -122,33 +123,74 @@ def notion_headers() -> Dict[str, str]:
     }
 
 
-async def search_notion_by_phone(phone_digits: str) -> Optional[Dict[str, Any]]:
-    """Search the Notion leads DB for a page whose Mobile Phone matches.
+async def fetch_all_notion_pages() -> Dict[str, str]:
+    """Fetch ALL pages from the Notion leads DB and build phone → page_id map.
 
-    Tries both raw digits and E.164 format since Notion may store either.
+    Uses paginated query (100 per page, ~60 API calls for 6000 pages).
+    Returns dict: { normalized_phone: notion_page_id }
     """
-    e164 = f"+1{phone_digits}" if len(phone_digits) == 10 else phone_digits
+    phone_map: Dict[str, str] = {}
+    has_more = True
+    start_cursor: Optional[str] = None
+    total_pages = 0
+    pages_with_phone = 0
+    api_call = 0
 
-    for phone_variant in [e164, phone_digits]:
-        payload = {
-            "filter": {
-                "property": "Mobile Phone",
-                "phone_number": {"equals": phone_variant},
-            },
-            "page_size": 1,
-        }
-        async with httpx.AsyncClient(timeout=30) as client:
+    async with httpx.AsyncClient(timeout=60) as client:
+        while has_more:
+            api_call += 1
+            payload: Dict[str, Any] = {"page_size": 100}
+            if start_cursor:
+                payload["start_cursor"] = start_cursor
+
             resp = await client.post(
                 f"{NOTION_BASE}/databases/{NOTION_LEADS_DB_ID}/query",
                 headers=notion_headers(),
                 json=payload,
             )
             resp.raise_for_status()
-            results = resp.json().get("results", [])
-            if results:
-                return results[0]
+            data = resp.json()
 
-    return None
+            results = data.get("results", [])
+            total_pages += len(results)
+
+            for page in results:
+                page_id = page.get("id", "")
+                props = page.get("properties", {})
+
+                # Mobile Phone is phone_number type
+                mp_prop = props.get("Mobile Phone", {})
+                raw_phone = ""
+                if mp_prop.get("type") == "phone_number":
+                    raw_phone = mp_prop.get("phone_number") or ""
+                elif mp_prop.get("type") == "rich_text":
+                    # Fallback if property type is rich_text
+                    texts = mp_prop.get("rich_text", [])
+                    raw_phone = "".join(t.get("plain_text", "") for t in texts)
+
+                if raw_phone and page_id:
+                    normalized = normalize_phone(str(raw_phone))
+                    if normalized:
+                        phone_map[normalized] = page_id
+                        pages_with_phone += 1
+
+            has_more = data.get("has_more", False)
+            start_cursor = data.get("next_cursor")
+
+            if api_call % 10 == 0 or not has_more:
+                logger.info(
+                    "Notion fetch: %d API calls, %d pages loaded, %d with phone",
+                    api_call, total_pages, pages_with_phone,
+                )
+
+            # Small delay to be kind to Notion rate limits (3 req/s for integrations)
+            await asyncio.sleep(0.35)
+
+    logger.info(
+        "Notion fetch complete: %d total pages, %d with valid phone, %d API calls",
+        total_pages, pages_with_phone, api_call,
+    )
+    return phone_map
 
 
 # -- DB helpers (sync via psycopg2 since this is a one-off script) --
@@ -210,27 +252,39 @@ def insert_xref_sqlite(conn, ghl_contact_id: str, notion_page_id: str, phone: st
     )
 
 
-async def main(dry_run: bool = False):
+async def main(dry_run: bool = False, output_path: Optional[str] = None):
+    start_time = time.time()
     logger.info("=== Backfill lead_xref — %s mode ===", "DRY RUN" if dry_run else "LIVE")
 
-    # 1. Connect to DB and get existing xrefs
+    # 1. Load ALL Notion pages into memory (phone → page_id map)
+    logger.info("Step 1: Loading all Notion pages into memory...")
+    notion_phone_map = await fetch_all_notion_pages()
+    logger.info("Notion phone map built: %d entries", len(notion_phone_map))
+
+    # 2. Connect to DB and get existing xrefs
     conn = get_db_connection()
     is_sqlite = DATABASE_URL.startswith("sqlite")
     existing_ghl_ids = fetch_existing_xrefs(conn)
     existing_phones = fetch_existing_phones(conn)
     logger.info("Existing xref rows: %d (by ghl_id), %d (by phone)", len(existing_ghl_ids), len(existing_phones))
 
-    # 2. Fetch all GHL contacts
+    # 3. Fetch all GHL contacts
+    logger.info("Step 2: Fetching all GHL contacts...")
     ghl_contacts = await fetch_all_ghl_contacts()
     logger.info("Total GHL contacts fetched: %d", len(ghl_contacts))
 
-    # 3. For each contact, try to match to Notion
+    # 4. Match GHL contacts to Notion pages via dict lookup (no API calls)
+    logger.info("Step 3: Matching contacts to Notion pages (dict lookups, no API calls)...")
     matched = 0
     skipped_existing = 0
+    skipped_no_phone = 0
     not_found = 0
     errors = 0
 
-    for i, contact in enumerate(ghl_contacts):
+    # CSV output
+    csv_rows: List[Tuple[str, str, str, str]] = []
+
+    for contact in ghl_contacts:
         contact_id = contact.get("id", "")
         if not contact_id:
             continue
@@ -243,80 +297,82 @@ async def main(dry_run: bool = False):
         # Get primary phone from GHL contact
         raw_phone = contact.get("phone", "")
         if not raw_phone:
-            not_found += 1
+            skipped_no_phone += 1
             continue
 
-        phone_digits = normalize_phone(raw_phone)
-        if not phone_digits or len(phone_digits) < 10:
-            not_found += 1
+        phone_e164 = normalize_phone(raw_phone)
+        if not phone_e164:
+            skipped_no_phone += 1
             continue
-
-        phone_e164 = normalize_phone_e164(raw_phone)
 
         # Skip if this phone is already mapped
-        if phone_e164 in existing_phones or phone_digits in existing_phones:
+        if phone_e164 in existing_phones:
             skipped_existing += 1
             continue
 
-        # Search Notion for this phone
-        try:
-            notion_page = await search_notion_by_phone(phone_digits)
-        except Exception as exc:
-            logger.warning("Notion search failed for %s: %s", phone_digits, exc)
-            errors += 1
-            continue
-
-        if not notion_page:
+        # Dict lookup — O(1), no API call
+        notion_page_id = notion_phone_map.get(phone_e164)
+        if not notion_page_id:
             not_found += 1
             continue
 
-        notion_page_id = notion_page["id"]
         first_name = contact.get("firstName", "")
         last_name = contact.get("lastName", "")
+        name = f"{first_name} {last_name}".strip()
 
         if dry_run:
-            logger.info(
-                "[DRY RUN] Would insert: ghl=%s notion=%s phone=%s name=%s %s",
-                contact_id, notion_page_id, phone_e164, first_name, last_name,
-            )
+            if matched < 10:  # Only log first 10 matches to avoid spam
+                logger.info(
+                    "[DRY RUN] Would insert: ghl=%s notion=%s phone=%s name=%s",
+                    contact_id, notion_page_id, phone_e164, name,
+                )
         else:
             try:
                 if is_sqlite:
                     insert_xref_sqlite(conn, contact_id, notion_page_id, phone_e164, first_name, last_name)
                 else:
                     insert_xref(conn, contact_id, notion_page_id, phone_e164, first_name, last_name)
-                logger.info(
-                    "Inserted xref: ghl=%s notion=%s phone=%s name=%s %s",
-                    contact_id, notion_page_id, phone_e164, first_name, last_name,
-                )
             except Exception as exc:
                 logger.warning("Insert failed for %s: %s", contact_id, exc)
                 errors += 1
                 continue
 
+        csv_rows.append((contact_id, notion_page_id, phone_e164, name))
         matched += 1
         existing_ghl_ids.add(contact_id)
         existing_phones.add(phone_e164)
-
-        # Rate limit: avoid hammering Notion API
-        if (i + 1) % 10 == 0:
-            await asyncio.sleep(0.5)
 
     if not dry_run:
         conn.commit()
 
     conn.close()
 
-    logger.info("=== Backfill complete ===")
-    logger.info("Matched & inserted: %d", matched)
-    logger.info("Skipped (already exists): %d", skipped_existing)
-    logger.info("Not found in Notion: %d", not_found)
-    logger.info("Errors: %d", errors)
+    # Write CSV if requested
+    if output_path and csv_rows:
+        with open(output_path, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["ghl_contact_id", "notion_page_id", "phone", "name"])
+            writer.writerows(csv_rows)
+        logger.info("CSV written to %s (%d rows)", output_path, len(csv_rows))
+
+    elapsed = time.time() - start_time
+    prefix = "DRY RUN COMPLETE" if dry_run else "BACKFILL COMPLETE"
+    summary = (
+        f"=== {prefix} === "
+        f"matched={matched} skipped={skipped_existing} "
+        f"no_phone={skipped_no_phone} not_found={not_found} "
+        f"errors={errors} total_ghl={len(ghl_contacts)} "
+        f"notion_phones={len(notion_phone_map)} "
+        f"elapsed={elapsed:.1f}s"
+    )
+    logger.info(summary)
+    print(f"\n{summary}\n")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Backfill lead_xref by matching GHL contacts to Notion pages")
     parser.add_argument("--dry-run", action="store_true", help="Preview without inserting")
+    parser.add_argument("--output", type=str, default=None, help="Path to save matched pairs CSV")
     args = parser.parse_args()
 
-    asyncio.run(main(dry_run=args.dry_run))
+    asyncio.run(main(dry_run=args.dry_run, output_path=args.output))
