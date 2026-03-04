@@ -235,13 +235,13 @@ function LeadImport() {
     <div className="dashboard">
       <section className="section">
         {/* Header row */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.25rem' }}>
+        <div className="section-header-row" style={{ marginBottom: '0.25rem' }}>
           {step !== 'source' && step !== 'importing' && step !== 'results' && (
             <button className="btn btn-sm" onClick={goBack} style={{ padding: '0.2rem 0.6rem' }}>&larr;</button>
           )}
           <h2 className="section-title" style={{ margin: 0 }}>{titleMap[step]}</h2>
           {fileName && step !== 'source' && step !== 'results' && (
-            <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.65rem', color: 'var(--text-muted)' }}>{fileName}</span>
+            <span className="wizard-filename">{fileName}</span>
           )}
           {step !== 'source' && step !== 'importing' && (
             <button className="btn btn-sm" onClick={resetWizard} style={{ marginLeft: 'auto', padding: '0.2rem 0.6rem' }}>Start Over</button>
@@ -250,7 +250,7 @@ function LeadImport() {
 
         {/* Step indicator */}
         {stepIdx >= 0 && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem', marginBottom: '1.25rem', fontFamily: 'var(--font-mono)', fontSize: '0.6rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', flexWrap: 'wrap' }}>
+          <div className="wizard-step-indicator">
             {stepFlow.map((s, i) => {
               const cur = s === step, done = i < stepIdx
               return (
@@ -304,7 +304,7 @@ function LeadImport() {
         {step === 'sheets' && (
           <div style={{ maxWidth: 560 }}>
             <p className="form-hint" style={{ marginBottom: '0.75rem' }}>Paste a Google Sheets URL or spreadsheet ID.</p>
-            <div style={{ display: 'flex', gap: '0.5rem' }}>
+            <div className="input-btn-row">
               <input className="form-input" style={{ flex: 1 }} placeholder="https://docs.google.com/spreadsheets/d/..." value={sheetUrl} onChange={e => setSheetUrl(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') fetchSheet() }} />
               <button className="btn btn-primary" onClick={fetchSheet} disabled={!sheetUrl.trim() || sheetLoading}>{sheetLoading ? 'Loading...' : 'Fetch'}</button>
             </div>
@@ -323,8 +323,8 @@ function LeadImport() {
             )}
             <div style={{ maxHeight: 360, overflow: 'auto' }}>
               {headers.map(h => (
-                <div key={h} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.375rem' }}>
-                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.75rem', color: 'var(--text-muted)', width: '38%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={h}>{h}</span>
+                <div key={h} className="column-map-row">
+                  <span className="column-map-label" title={h}>{h}</span>
                   <span style={{ color: 'var(--text-muted)', fontSize: '0.7rem' }}>→</span>
                   <select className="form-input" style={{ flex: 1, fontSize: '0.75rem', padding: '0.25rem 0.5rem' }} value={columnMap[h] || ''} onChange={e => setColumnMap(prev => ({ ...prev, [h]: e.target.value }))}>
                     <option value="">— skip —</option>
@@ -386,8 +386,8 @@ function LeadImport() {
         {/* PREVIEW */}
         {step === 'preview' && (
           <div>
-            <div style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 2, padding: '0.75rem 1rem', marginBottom: '1rem' }}>
-              <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.7rem', color: 'var(--text-muted)', display: 'flex', flexWrap: 'wrap', gap: '1.25rem' }}>
+            <div className="preview-summary">
+              <div className="preview-summary-grid">
                 <span><strong style={{ color: 'var(--text)' }}>{parsedRows.length}</strong> leads to import</span>
                 <span>Source: <strong style={{ color: 'var(--text)' }}>{fileName}</strong></span>
                 <span>Vendor: <strong style={{ color: 'var(--text)' }}>{vendor} / {tier}</strong></span>
@@ -397,7 +397,7 @@ function LeadImport() {
               </div>
             </div>
             {previewLeads.length > 0 && (
-              <div style={{ overflow: 'auto', maxHeight: 240, marginBottom: '1rem' }}>
+              <div className="table-scroll-wrapper" style={{ maxHeight: 240, marginBottom: '1rem' }}>
                 <table className="results-table">
                   <thead><tr><th>#</th><th>Name</th><th>Phone</th><th>Email</th><th>Source</th></tr></thead>
                   <tbody>

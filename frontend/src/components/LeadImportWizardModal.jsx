@@ -200,8 +200,8 @@ function LeadImportWizardModal({ isOpen, onClose, onComplete, getHeaders }) {
   const previewLeads = step === 'preview' ? buildLeads(parsedRows.slice(0, 5), headers, columnMap, vendor, tier, leadType, leadAge, purchaseDate) : []
 
   /* RENDER */
-  const modalBg = { position: 'fixed', inset: 0, zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.6)', padding: '1rem' }
-  const modalBox = { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 3, width: '100%', maxWidth: 720, maxHeight: '85vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }
+  const modalBg = { position: 'fixed', inset: 0, zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.6)', padding: '0.5rem' }
+  const modalBox = { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 3, width: '100%', maxWidth: 720, maxHeight: '90vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }
   const headerBar = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.875rem 1.25rem', borderBottom: '1px solid var(--border)' }
   const bodyPad = { flex: 1, overflow: 'auto', padding: '1.25rem' }
 
@@ -278,7 +278,7 @@ function LeadImportWizardModal({ isOpen, onClose, onComplete, getHeaders }) {
           {step === 'sheets' && (
             <div>
               <p className="form-hint" style={{ marginBottom: '0.75rem' }}>Paste a Google Sheets URL or spreadsheet ID.</p>
-              <div style={{ display: 'flex', gap: '0.5rem' }}>
+              <div className="input-btn-row">
                 <input className="form-input" style={{ flex: 1 }} placeholder="https://docs.google.com/spreadsheets/d/..." value={sheetUrl} onChange={e => setSheetUrl(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') fetchSheet() }} />
                 <button className="btn btn-primary" onClick={fetchSheet} disabled={!sheetUrl.trim() || sheetLoading}>{sheetLoading ? 'Loading...' : 'Fetch'}</button>
               </div>
@@ -293,8 +293,8 @@ function LeadImportWizardModal({ isOpen, onClose, onComplete, getHeaders }) {
               {!mappingOk && <div style={{ background: 'oklch(18% 0.04 75)', border: '1px solid oklch(25% 0.05 75)', color: 'var(--amber)', padding: '0.5rem 0.75rem', fontFamily: 'var(--font-mono)', fontSize: '0.7rem', borderRadius: 2, marginBottom: '0.75rem' }}>Map at least First Name, Last Name, and Phone to continue.</div>}
               <div style={{ maxHeight: 320, overflow: 'auto' }}>
                 {headers.map(h => (
-                  <div key={h} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.375rem' }}>
-                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.75rem', color: 'var(--text-muted)', width: '38%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={h}>{h}</span>
+                  <div key={h} className="column-map-row">
+                    <span className="column-map-label" title={h}>{h}</span>
                     <span style={{ color: 'var(--text-muted)', fontSize: '0.7rem' }}>&rarr;</span>
                     <select className="form-input" style={{ flex: 1, fontSize: '0.75rem', padding: '0.25rem 0.5rem' }} value={columnMap[h] || ''} onChange={e => setColumnMap(prev => ({ ...prev, [h]: e.target.value }))}>
                       <option value="">&mdash; skip &mdash;</option>
@@ -357,8 +357,8 @@ function LeadImportWizardModal({ isOpen, onClose, onComplete, getHeaders }) {
           {/* PREVIEW */}
           {step === 'preview' && (
             <div>
-              <div style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 2, padding: '0.75rem 1rem', marginBottom: '1rem' }}>
-                <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.7rem', color: 'var(--text-muted)', display: 'flex', flexWrap: 'wrap', gap: '1.25rem' }}>
+              <div className="preview-summary">
+                <div className="preview-summary-grid">
                   <span><strong style={{ color: 'var(--text)' }}>{parsedRows.length}</strong> leads to import</span>
                   <span>Source: <strong style={{ color: 'var(--text)' }}>{fileName}</strong></span>
                   <span>Vendor: <strong style={{ color: 'var(--text)' }}>{vendor} / {tier}</strong></span>
@@ -368,7 +368,7 @@ function LeadImportWizardModal({ isOpen, onClose, onComplete, getHeaders }) {
                 </div>
               </div>
               {previewLeads.length > 0 && (
-                <div style={{ overflow: 'auto', maxHeight: 220, marginBottom: '1rem' }}>
+                <div className="table-scroll-wrapper" style={{ maxHeight: 220, marginBottom: '1rem' }}>
                   <table className="results-table">
                     <thead><tr><th>#</th><th>Name</th><th>Phone</th><th>Email</th><th>Source</th></tr></thead>
                     <tbody>

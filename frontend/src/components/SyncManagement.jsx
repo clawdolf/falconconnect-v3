@@ -79,7 +79,7 @@ function SyncManagement() {
     <div className="dashboard">
       {/* Sync Status */}
       <section className="section">
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
+        <div className="section-header-row" style={{ marginBottom: '1rem' }}>
           <h2 className="section-title" style={{ marginBottom: 0, paddingBottom: 0, borderBottom: 'none' }}>
             Sync Status
           </h2>
@@ -163,6 +163,7 @@ function SyncManagement() {
             </div>
 
             {dryRunResults.results && dryRunResults.results.length > 0 ? (
+              <div className="table-scroll-wrapper">
               <table className="results-table">
                 <thead>
                   <tr>
@@ -187,6 +188,7 @@ function SyncManagement() {
                   ))}
                 </tbody>
               </table>
+              </div>
             ) : (
               <p className="no-results">No appointments found matching criteria.</p>
             )}

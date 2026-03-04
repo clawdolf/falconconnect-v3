@@ -82,6 +82,7 @@ function DryRunReport() {
           </div>
 
           {results.results.length > 0 ? (
+            <div className="table-scroll-wrapper">
             <table className="results-table">
               <thead>
                 <tr>
@@ -106,6 +107,7 @@ function DryRunReport() {
                 ))}
               </tbody>
             </table>
+            </div>
           ) : (
             <p className="no-results">No appointments found matching criteria.</p>
           )}

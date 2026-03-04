@@ -231,7 +231,7 @@ function Analytics() {
     <div className="dashboard">
       {/* Days Toggle */}
       <section className="section">
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div className="section-header-row">
           <h2 className="section-title" style={{ marginBottom: 0, paddingBottom: 0, borderBottom: 'none' }}>
             Production Analytics
           </h2>
@@ -305,6 +305,7 @@ function Analytics() {
           <section className="section">
             <h2 className="section-title">Daily Breakdown</h2>
             {daily && daily.data && daily.data.length > 0 ? (
+              <div className="table-scroll-wrapper">
               <table className="results-table">
                 <thead>
                   <tr>
@@ -319,6 +320,7 @@ function Analytics() {
                   ))}
                 </tbody>
               </table>
+              </div>
             ) : (
               <p className="no-results">No daily data available.</p>
             )}
@@ -328,7 +330,7 @@ function Analytics() {
 
       {/* ═══ Accountability Tracker — Google Sheets ═══ */}
       <section className="section">
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div className="section-header-row">
           <h2 className="section-title" style={{ marginBottom: 0, paddingBottom: 0, borderBottom: 'none' }}>
             Accountability Tracker
           </h2>
@@ -356,7 +358,7 @@ function Analytics() {
         <section className="section">
           <h2 className="section-title" style={{ fontSize: '0.75rem' }}>Sheet Connection</h2>
           <p className="form-hint" style={{ margin: '0 0 0.5rem' }}>Paste the URL or ID of the accountability tracker spreadsheet</p>
-          <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem' }}>
+          <div className="input-btn-row" style={{ marginBottom: '0.75rem' }}>
             <input
               className="form-input"
               style={{ flex: 1 }}

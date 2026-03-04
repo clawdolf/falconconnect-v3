@@ -638,8 +638,101 @@ body {
 }
 
 /* ══════════════════════════════════════════════
-   RESPONSIVE
+   TABLE SCROLL WRAPPER
    ══════════════════════════════════════════════ */
+
+.table-scroll-wrapper {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  width: 100%;
+}
+
+/* ══════════════════════════════════════════════
+   SECTION HEADER ROW (title + controls)
+   ══════════════════════════════════════════════ */
+
+.section-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+/* ══════════════════════════════════════════════
+   INPUT + BUTTON ROW
+   ══════════════════════════════════════════════ */
+
+.input-btn-row {
+  display: flex;
+  gap: 0.5rem;
+}
+
+/* ══════════════════════════════════════════════
+   WIZARD STEP INDICATOR
+   ══════════════════════════════════════════════ */
+
+.wizard-step-indicator {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  margin-bottom: 1.25rem;
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  flex-wrap: wrap;
+}
+
+.wizard-filename {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  color: var(--text-muted);
+}
+
+/* ══════════════════════════════════════════════
+   COLUMN MAPPING ROWS
+   ══════════════════════════════════════════════ */
+
+.column-map-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.375rem;
+}
+
+.column-map-label {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  width: 38%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ══════════════════════════════════════════════
+   PREVIEW SUMMARY
+   ══════════════════════════════════════════════ */
+
+.preview-summary {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+}
+
+.preview-summary-grid {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.25rem;
+}
 
 /* ══════════════════════════════════════════════
    FORMS
@@ -1008,5 +1101,180 @@ body {
 
   .stat-box:nth-child(2n) {
     border-right: none;
+  }
+
+  /* ── Touch targets — minimum 44px ── */
+  .btn {
+    min-height: 44px;
+    padding: 0.5rem 0.875rem;
+  }
+
+  .btn-sm {
+    min-height: 36px;
+    padding: 0.375rem 0.625rem;
+  }
+
+  .btn-primary {
+    min-height: 44px;
+  }
+
+  .nav-item {
+    min-height: 44px;
+  }
+
+  .mobile-nav-item {
+    min-height: 44px;
+  }
+
+  /* ── Form inputs — larger touch targets ── */
+  .form-input {
+    min-height: 40px;
+    padding: 0.5rem 0.625rem;
+    font-size: 1rem; /* Prevent iOS zoom on focus */
+  }
+
+  .custom-signin-input {
+    min-height: 44px;
+    padding: 0.625rem;
+    font-size: 1rem;
+  }
+
+  .custom-signin-btn {
+    min-height: 44px;
+  }
+
+  /* ── Section padding — tighter on mobile ── */
+  .section {
+    padding: 1rem;
+  }
+
+  .section-title {
+    font-size: 0.8rem;
+  }
+
+  /* ── Section header row ── */
+  .section-header-row {
+    gap: 0.5rem;
+  }
+
+  /* ── Input + button row — stack on very narrow ── */
+  .input-btn-row {
+    flex-direction: column;
+  }
+
+  .input-btn-row .btn,
+  .input-btn-row .btn-primary {
+    width: 100%;
+  }
+
+  /* ── Column mapping — responsive ── */
+  .column-map-row {
+    flex-wrap: wrap;
+    gap: 0.375rem;
+  }
+
+  .column-map-label {
+    width: 100%;
+    white-space: normal;
+    font-size: 0.7rem;
+  }
+
+  /* ── Preview summary — stack items vertically on mobile ── */
+  .preview-summary-grid {
+    flex-direction: column;
+    gap: 0.375rem;
+  }
+
+  /* ── Wizard step indicator — smaller on mobile ── */
+  .wizard-step-indicator {
+    gap: 0.25rem;
+    font-size: 0.55rem;
+  }
+
+  /* ── Result row — stack on mobile ── */
+  .result-row {
+    flex-direction: column;
+    gap: 0.25rem;
+    align-items: flex-start;
+  }
+
+  .result-label {
+    min-width: auto;
+  }
+
+  /* ── Stat value — slightly smaller on mobile ── */
+  .stat-value {
+    font-size: 1rem;
+  }
+
+  /* ── Table cells — prevent wrapping issues ── */
+  .results-table th,
+  .results-table td {
+    padding: 0.5rem 0.5rem;
+    white-space: nowrap;
+    font-size: 0.75rem;
+  }
+
+  .results-table th {
+    font-size: 0.6rem;
+  }
+}
+
+/* ══════════════════════════════════════════════
+   SMALL MOBILE (≤ 480px)
+   ══════════════════════════════════════════════ */
+
+@media (max-width: 480px) {
+  .main-content {
+    padding: 1rem 0.75rem;
+  }
+
+  .section {
+    padding: 0.875rem 0.75rem;
+  }
+
+  /* Status grid — single column on very small screens */
+  .status-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .status-cell {
+    border-right: none;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+
+  .status-cell:last-child {
+    border-bottom: none;
+  }
+
+  /* Stat boxes — full width */
+  .stat-box {
+    min-width: 100%;
+    border-right: none;
+  }
+
+  /* Days toggle — ensure it wraps nicely */
+  .days-toggle {
+    flex-wrap: wrap;
+  }
+
+  /* Feed header — stack on very small */
+  .feed-header {
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+
+  /* Auth card — tighter padding */
+  .auth-screen {
+    padding: 1rem;
+  }
+
+  .custom-signin-form {
+    padding: 1rem;
+  }
+
+  /* Wizard step indicator — hide dashes on very small */
+  .wizard-step-indicator span > span:last-child {
+    display: none;
   }
 }

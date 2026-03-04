@@ -221,6 +221,7 @@ function Licenses() {
         ) : (
           <>
             {licenses.length > 0 ? (
+              <div className="table-scroll-wrapper">
               <table className="results-table">
                 <thead>
                   <tr>
@@ -258,16 +259,18 @@ function Licenses() {
                         </a>
                       </td>
                       <td>
+                        <div style={{ display: 'flex', gap: '0.375rem', flexWrap: 'nowrap' }}>
                         <button className="btn btn-sm" onClick={() => startEdit(lic)} disabled={submitting}>Edit</button>
-                        {' '}
                         <button className={`btn btn-sm ${deleteConfirm === lic.id ? 'c-red' : ''}`} onClick={() => handleDelete(lic.id)} disabled={submitting}>
                           {deleteConfirm === lic.id ? 'Confirm?' : 'Delete'}
                         </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+              </div>
             ) : (
               <p className="no-results">No licenses found.</p>
             )}
