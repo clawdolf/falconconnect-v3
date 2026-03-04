@@ -17,9 +17,8 @@ Configuration (env vars):
 """
 
 import asyncio
-import json
 import logging
-from datetime import date, datetime, timezone
+from datetime import date
 from typing import Any, Dict, List, Optional
 
 from config import get_settings
@@ -163,9 +162,11 @@ async def run_notion_ghl_sync(
         if dry_run:
             result["action"] = "would_create"
             result["dry_run"] = True
+            # In dry-run, report what phone would be used — don't touch GHL
+            result["phone_used"] = page["phone"] or "(none)"
             logger.info(
-                "[DRY RUN] Would push appointment to GHL: %s at %s",
-                page["name"], appt_date_str,
+                "[DRY RUN] Would push appointment to GHL: %s at %s (phone: %s)",
+                page["name"], appt_date_str, page["phone"],
             )
         else:
             # Find GHL contact ID — check extracted data first, then DB xref
@@ -196,6 +197,20 @@ async def run_notion_ghl_sync(
                 continue
 
             try:
+                # Sync phone — update GHL primary phone if Notion best phone differs
+                notion_phone = page.get("phone", "")
+                phone_sync_result = await ghl.sync_phone_if_changed(
+                    contact_id=ghl_contact_id,
+                    notion_phone=notion_phone,
+                )
+                result["phone_sync"] = phone_sync_result
+                if phone_sync_result == "updated":
+                    logger.info(
+                        "Phone updated in GHL for %s (contact %s) → %s",
+                        page["name"], ghl_contact_id, notion_phone,
+                    )
+
+                # Push appointment — append only, never remove existing data
                 appt_result = await ghl.upsert_appointment(
                     contact_id=ghl_contact_id,
                     start_time=appt_date_str,
