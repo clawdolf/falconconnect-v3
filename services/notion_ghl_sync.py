@@ -28,6 +28,36 @@ from services import ghl, notion
 logger = logging.getLogger("falconconnect.sync.notion_ghl")
 
 
+def _extract_phone(props: Dict[str, Any]) -> str:
+    """Resolve the best phone number from a Notion page's properties.
+
+    Priority:
+    1. Read "Best Phone" select field (values: "Home", "Cell", "Spouse")
+    2. Map to corresponding phone_number property:
+       - "Home"   → "Home Phone"
+       - "Cell"   → "Mobile Phone"
+       - "Spouse" → "Spouse Phone"
+    3. Fall back to "Mobile Phone" if Best Phone is unset or the mapped field is empty.
+    """
+    best_phone_select = props.get("Best Phone", {}).get("select") or {}
+    best_phone_label = best_phone_select.get("name", "")
+
+    phone_field_map = {
+        "Home": "Home Phone",
+        "Cell": "Mobile Phone",
+        "Spouse": "Spouse Phone",
+    }
+
+    preferred_field = phone_field_map.get(best_phone_label, "Mobile Phone")
+    phone = props.get(preferred_field, {}).get("phone_number", "") or ""
+
+    # Fall back to Mobile Phone if preferred field is empty
+    if not phone and preferred_field != "Mobile Phone":
+        phone = props.get("Mobile Phone", {}).get("phone_number", "") or ""
+
+    return phone
+
+
 def _extract_page_data(page: Dict[str, Any]) -> Dict[str, Any]:
     """Extract structured data from a Notion page object.
 
@@ -40,8 +70,8 @@ def _extract_page_data(page: Dict[str, Any]) -> Dict[str, Any]:
     name_items = props.get("Name", {}).get("title", [])
     name = "".join(item.get("plain_text", "") for item in name_items) if name_items else ""
 
-    # Phone (phone_number)
-    phone = props.get("Mobile Phone", {}).get("phone_number", "") or ""
+    # Phone — resolve via "Best Phone" select field, fall back to Mobile Phone
+    phone = _extract_phone(props)
 
     # Appointment Date (date)
     appt_date_obj = props.get("Appointment Date", {}).get("date")
