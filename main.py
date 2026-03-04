@@ -24,6 +24,9 @@ logger = logging.getLogger("falconconnect")
 async def lifespan(app: FastAPI):
     """Startup / shutdown lifecycle."""
     logger.info("FalconConnect v3 starting up …")
+
+    # init_db() runs create_all (idempotent — creates missing tables, skips existing)
+    # Alembic migrations ran at build time; this is a fast safety net only.
     await init_db()
 
     # Start background Notion → GHL sync loop
