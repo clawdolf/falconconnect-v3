@@ -6,11 +6,10 @@ import os
 from datetime import datetime, timezone
 
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from db.database import init_db, get_session
-from sqlalchemy.ext.asyncio import AsyncSession
+from db.database import init_db
 from routers import leads, webhooks, calendar, analytics, admin, sync, licenses
 from services.notion_ghl_sync import sync_loop
 
@@ -90,21 +89,6 @@ async def debug_env():
     }
 
 
-@app.get("/debug/db")
-async def debug_db():
-    """Temporary debug endpoint — checks DB state (license count, alembic version)."""
-    from sqlalchemy import text
-    from db.database import get_engine
-    async with get_engine().connect() as conn:
-        alembic_result = await conn.execute(text("SELECT version_num FROM alembic_version"))
-        versions = [r[0] for r in alembic_result.fetchall()]
-        count_result = await conn.execute(text("SELECT COUNT(*) FROM licenses"))
-        count = count_result.scalar()
-        sample_result = await conn.execute(
-            text("SELECT state_abbreviation, license_number, status FROM licenses LIMIT 10")
-        )
-        rows = [{"state": r[0], "license_number": r[1], "status": r[2]} for r in sample_result.fetchall()]
-    return {"alembic_versions": versions, "license_count": count, "sample_licenses": rows}
 
 
 # API routers
