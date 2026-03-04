@@ -53,9 +53,9 @@ function DryRunReport() {
   }
 
   return (
-    <section className="card">
-      <h2>Notion → GHL Sync (Dry Run)</h2>
-      <p className="muted">
+    <section className="section">
+      <h2 className="section-title">Notion → GHL Sync (Dry Run)</h2>
+      <p className="section-desc">
         Preview which appointments would be pushed to GHL. No data is modified.
       </p>
 
@@ -74,7 +74,7 @@ function DryRunReport() {
       )}
 
       {results && (
-        <div className="dry-run-results">
+        <div style={{ marginTop: '1rem' }}>
           <div className="results-meta">
             <span>Mode: <strong>{results.mode}</strong></span>
             <span>After date: <strong>{results.sync_after_date}</strong></span>
@@ -107,7 +107,7 @@ function DryRunReport() {
               </tbody>
             </table>
           ) : (
-            <p className="muted">No appointments found matching criteria.</p>
+            <p className="no-results">No appointments found matching criteria.</p>
           )}
         </div>
       )}
