@@ -1,9 +1,39 @@
+import { useState } from 'react'
 import { ClerkProvider, SignIn, SignedIn, SignedOut, UserButton } from '@clerk/clerk-react'
 import Dashboard from './components/Dashboard'
+import LeadImport from './components/LeadImport'
+import Licenses from './components/Licenses'
+import SyncManagement from './components/SyncManagement'
+import Analytics from './components/Analytics'
 
 const PUBLISHABLE_KEY = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY
 
+const NAV_ITEMS = [
+  { key: 'dashboard', label: 'Dashboard' },
+  { key: 'leads', label: 'Lead Import' },
+  { key: 'licenses', label: 'Licenses' },
+  { key: 'sync', label: 'Sync' },
+  { key: 'analytics', label: 'Analytics' },
+]
+
+function PageContent({ currentPage }) {
+  switch (currentPage) {
+    case 'leads':
+      return <LeadImport />
+    case 'licenses':
+      return <Licenses />
+    case 'sync':
+      return <SyncManagement />
+    case 'analytics':
+      return <Analytics />
+    default:
+      return <Dashboard />
+  }
+}
+
 function AppLayout() {
+  const [currentPage, setCurrentPage] = useState('dashboard')
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -13,10 +43,16 @@ function AppLayout() {
           </div>
         </div>
         <nav className="sidebar-nav">
-          <button className="nav-item active">
-            <span className="nav-indicator" />
-            Dashboard
-          </button>
+          {NAV_ITEMS.map((item) => (
+            <button
+              key={item.key}
+              className={`nav-item ${currentPage === item.key ? 'active' : ''}`}
+              onClick={() => setCurrentPage(item.key)}
+            >
+              <span className="nav-indicator" />
+              {item.label}
+            </button>
+          ))}
         </nav>
         <div className="sidebar-footer">
           <UserButton
@@ -32,7 +68,7 @@ function AppLayout() {
         </div>
       </aside>
       <main className="main-content">
-        <Dashboard />
+        <PageContent currentPage={currentPage} />
       </main>
     </div>
   )
