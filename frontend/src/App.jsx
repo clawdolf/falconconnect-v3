@@ -3,15 +3,49 @@ import Dashboard from './components/Dashboard'
 
 const PUBLISHABLE_KEY = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY
 
+function AppLayout() {
+  return (
+    <div className="app-shell">
+      <aside className="sidebar">
+        <div className="sidebar-header">
+          <div className="sidebar-wordmark">
+            FALCON<br />CONNECT
+          </div>
+        </div>
+        <nav className="sidebar-nav">
+          <button className="nav-item active">
+            <span className="nav-indicator" />
+            Dashboard
+          </button>
+        </nav>
+        <div className="sidebar-footer">
+          <UserButton
+            appearance={{
+              elements: {
+                avatarBox: {
+                  width: 28,
+                  height: 28,
+                },
+              },
+            }}
+          />
+        </div>
+      </aside>
+      <main className="main-content">
+        <Dashboard />
+      </main>
+    </div>
+  )
+}
+
 function App() {
-  // If Clerk key is not configured, show the dashboard without auth
-  // (backend also falls through when CLERK_SECRET_KEY is empty)
+  // No Clerk key — show dashboard without auth
   if (!PUBLISHABLE_KEY) {
     return (
-      <div className="app">
-        <header className="header">
-          <h1>FalconConnect</h1>
-          <span className="badge badge-warn">Auth not configured</span>
+      <div className="app-noauth">
+        <header className="header-noauth">
+          <span className="header-noauth-title">FalconConnect</span>
+          <span className="badge-noauth">Auth not configured</span>
         </header>
         <Dashboard />
       </div>
@@ -23,20 +57,15 @@ function App() {
       <SignedOut>
         <div className="auth-screen">
           <div className="auth-card">
-            <h1>FalconConnect</h1>
-            <p className="subtitle">Internal Dashboard</p>
+            <h1 className="auth-wordmark">FALCONCONNECT</h1>
+            <hr className="auth-rule" />
+            <p className="auth-subtitle">Internal System</p>
             <SignIn />
           </div>
         </div>
       </SignedOut>
       <SignedIn>
-        <div className="app">
-          <header className="header">
-            <h1>FalconConnect</h1>
-            <UserButton />
-          </header>
-          <Dashboard />
-        </div>
+        <AppLayout />
       </SignedIn>
     </ClerkProvider>
   )

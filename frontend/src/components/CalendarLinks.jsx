@@ -27,10 +27,10 @@ function CalendarLinks() {
   }
 
   return (
-    <section className="card">
-      <h2>Calendar Subscriptions</h2>
-      <p className="muted">
-        Subscribe to these URLs in Apple Calendar (or any iCal client).
+    <section className="section">
+      <h2 className="section-title">Calendar Subscriptions</h2>
+      <p className="section-desc">
+        Subscribe to these URLs in Apple Calendar or any iCal client.
         They auto-refresh with the latest data from Notion.
       </p>
       <div className="feed-list">
@@ -38,17 +38,17 @@ function CalendarLinks() {
           const url = `${BASE_URL}${feed.path}`
           return (
             <div key={idx} className="feed-item">
-              <div className="feed-info">
-                <strong>{feed.name}</strong>
-                <span className="muted">{feed.description}</span>
+              <div className="feed-header">
+                <span className="feed-name">{feed.name}</span>
+                <span className="feed-desc">{feed.description}</span>
               </div>
-              <div className="feed-url">
-                <code>{url}</code>
+              <div className="feed-url-row">
+                <code className="feed-url-code">{url}</code>
                 <button
                   className="btn btn-sm"
                   onClick={() => copyToClipboard(url, idx)}
                 >
-                  {copied === idx ? 'Copied!' : 'Copy'}
+                  {copied === idx ? 'Copied' : 'Copy'}
                 </button>
               </div>
             </div>
