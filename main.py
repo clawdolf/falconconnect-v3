@@ -24,7 +24,6 @@ logger = logging.getLogger("falconconnect")
 async def _seed_licenses_if_empty() -> None:
     """Seed Seb's 8 licenses from v2 prod DB if table is empty. Idempotent."""
     from sqlalchemy import text
-    from db.database import _get_session_factory  # type: ignore[attr-defined]
 
     SEB_USER_ID = "72dc5b7c-ba2c-4a1d-83b9-733ff600c0d5"
     LICENSES = [
@@ -38,8 +37,8 @@ async def _seed_licenses_if_empty() -> None:
         ("Texas",          "TX", "3317972", "https://www.sircon.com/ComplianceExpress/Inquiry/consumerInquiry.do?nonSscrb=Y", True),
     ]
     try:
-        factory = _get_session_factory()
-        async with factory() as session:
+        from db.database import _get_session_factory as _sf
+        async with _sf()() as session:
             result = await session.execute(text("SELECT COUNT(*) FROM licenses WHERE user_id = :uid"), {"uid": SEB_USER_ID})
             if result.scalar() == 0:
                 logger.info("Seeding 8 licenses for Seb (table empty)")
