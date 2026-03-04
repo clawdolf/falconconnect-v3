@@ -129,10 +129,10 @@ async def upsert_contact(
     if lead.get("zip_code"):
         payload["postalCode"] = lead["zip_code"]
 
-    # Source / tags
+    # Source / tags — upsert first, then merge tags to avoid replacing existing ones
     source = lead.get("lead_source") or lead.get("source") or "FC v3"
     payload["source"] = source
-    payload["tags"] = [source, "fc-v3"]
+    # Do NOT include tags in the upsert payload — we merge them separately below
 
     async with httpx.AsyncClient(timeout=30) as client:
         resp = await client.post(
@@ -143,7 +143,32 @@ async def upsert_contact(
         resp.raise_for_status()
         data = resp.json()
         contact = data.get("contact", data)
-        logger.info("GHL upsert_contact → %s (new=%s)", contact.get("id", "unknown"), data.get("new", "?"))
+        contact_id = contact.get("id", "")
+        logger.info("GHL upsert_contact → %s (new=%s)", contact_id, data.get("new", "?"))
+
+        # Merge tags — GET existing, union with new, PUT back
+        if contact_id:
+            try:
+                existing_resp = await client.get(
+                    f"{GHL_BASE}/contacts/{contact_id}",
+                    headers=_headers(),
+                )
+                existing_resp.raise_for_status()
+                existing_contact = existing_resp.json().get("contact", {})
+                existing_tags: List[str] = existing_contact.get("tags", []) or []
+                new_tags = [source, "fc-v3"]
+                merged_tags = list(dict.fromkeys(existing_tags + new_tags))  # preserve order, dedupe
+
+                tag_resp = await client.put(
+                    f"{GHL_BASE}/contacts/{contact_id}",
+                    headers=_headers(),
+                    json={"tags": merged_tags},
+                )
+                tag_resp.raise_for_status()
+                logger.debug("GHL tags merged for %s: %s", contact_id, merged_tags)
+            except Exception as tag_exc:
+                logger.warning("GHL tag merge failed (non-fatal): %s", tag_exc)
+
         return contact
 
 
@@ -268,3 +293,46 @@ async def get_contact_by_id(contact_id: str) -> Optional[Dict[str, Any]]:
             return None
         resp.raise_for_status()
         return resp.json().get("contact", resp.json())
+
+
+async def sync_phone_if_changed(contact_id: str, notion_phone: str) -> Optional[str]:
+    """Compare Notion best phone against GHL primary phone. Update only if different.
+
+    Returns:
+        "updated" if GHL phone was changed.
+        "match" if phones already match.
+        "skipped" if notion_phone is empty or contact not found.
+        "error" on failure.
+    """
+    if not notion_phone or not contact_id:
+        return "skipped"
+
+    try:
+        contact = await get_contact_by_id(contact_id)
+        if not contact:
+            return "skipped"
+
+        # GHL stores phone as E.164 or raw — normalize both for comparison
+        ghl_phone = (contact.get("phone") or "").strip().replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
+        n_phone = notion_phone.strip().replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
+
+        if ghl_phone == n_phone:
+            return "match"
+
+        # Phones differ — update GHL primary phone to Notion best phone
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.put(
+                f"{GHL_BASE}/contacts/{contact_id}",
+                headers=_headers(),
+                json={"phone": notion_phone},
+            )
+            resp.raise_for_status()
+            logger.info(
+                "GHL phone updated for %s: %s → %s",
+                contact_id, contact.get("phone"), notion_phone,
+            )
+            return "updated"
+
+    except Exception as exc:
+        logger.warning("sync_phone_if_changed failed for %s: %s", contact_id, exc)
+        return "error"
