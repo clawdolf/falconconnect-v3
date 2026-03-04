@@ -28,7 +28,7 @@ Thumbs.db
 
 # Frontend
 frontend/node_modules/
-frontend/dist/
+# frontend/dist/ is committed — Render Python runtime lacks Node.js
 
 # Alembic
 alembic/versions/__pycache__/

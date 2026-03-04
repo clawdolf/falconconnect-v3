@@ -2,7 +2,7 @@ services:
   - type: web
     name: falconconnect-v3
     runtime: python
-    buildCommand: "cd frontend && npm install && npm run build && cd .. && pip install -r requirements.txt && alembic upgrade head"
+    buildCommand: "pip install -r requirements.txt && alembic upgrade head"
     startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: DATABASE_URL
@@ -11,8 +11,6 @@ services:
           property: connectionString
       - key: PYTHON_VERSION
         value: "3.12"
-      - key: NODE_VERSION
-        value: "20"
 
 databases:
   - name: falconconnect-v3-db
