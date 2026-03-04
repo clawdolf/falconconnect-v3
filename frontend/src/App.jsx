@@ -7,6 +7,7 @@ import SyncManagement from './components/SyncManagement'
 import Analytics from './components/Analytics'
 
 const PUBLISHABLE_KEY = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY
+const DEV_BYPASS = import.meta.env.VITE_DEV_BYPASS === 'true'
 
 const NAV_ITEMS = [
   { key: 'dashboard', label: 'Dashboard' },
@@ -181,18 +182,20 @@ function AppLayout() {
           </nav>
         )}
 
-        <div className="sidebar-footer">
-          <UserButton
-            appearance={{
-              elements: {
-                avatarBox: {
-                  width: 28,
-                  height: 28,
+        {!DEV_BYPASS && PUBLISHABLE_KEY && (
+          <div className="sidebar-footer">
+            <UserButton
+              appearance={{
+                elements: {
+                  avatarBox: {
+                    width: 28,
+                    height: 28,
+                  },
                 },
-              },
-            }}
-          />
-        </div>
+              }}
+            />
+          </div>
+        )}
       </aside>
       <main className="main-content">
         <PageContent currentPage={currentPage} />
@@ -202,17 +205,9 @@ function AppLayout() {
 }
 
 function App() {
-  // No Clerk key — show dashboard without auth
-  if (!PUBLISHABLE_KEY) {
-    return (
-      <div className="app-noauth">
-        <header className="header-noauth">
-          <span className="header-noauth-title">FalconConnect</span>
-          <span className="badge-noauth">Auth not configured</span>
-        </header>
-        <Dashboard />
-      </div>
-    )
+  // Dev bypass or no Clerk key — skip auth entirely
+  if (DEV_BYPASS || !PUBLISHABLE_KEY) {
+    return <AppLayout />
   }
 
   return (
