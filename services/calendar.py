@@ -1,8 +1,10 @@
 """iCal generation service — builds .ics feeds from Notion data.
 
 Two separate feeds:
-  - Appointments: timed 1-hour events with -60min and -24h alarms
+  - Appointments: timed 15-minute events with -60min and -24h alarms
   - Follow-ups:   all-day events with 8am morning alarm
+
+Both feeds include a direct Notion page link in every event description.
 
 Uses real Notion property names:
   Name (title), Mobile Phone (phone_number), Lead Status (status),
@@ -22,6 +24,17 @@ logger = logging.getLogger("falconconnect.calendar")
 PHOENIX_TZ = pytz.timezone("America/Phoenix")
 
 
+def _notion_url(page_id: str) -> str:
+    """Build a direct Notion page URL from a page ID.
+
+    Strips hyphens from the UUID to produce the URL format Notion expects.
+    Example: 184d58e6-3823-800f-9b13-f06aaa14e0e6
+           → https://www.notion.so/184d58e638238009b13f06aaa14e0e6
+    """
+    clean_id = page_id.replace("-", "")
+    return f"https://www.notion.so/{clean_id}"
+
+
 def _new_calendar(cal_name: str) -> Calendar:
     """Create a fresh iCalendar object with standard headers."""
     cal = Calendar()
@@ -35,7 +48,11 @@ def _new_calendar(cal_name: str) -> Calendar:
 
 
 def build_appointments_feed(pages: List[Dict[str, Any]]) -> str:
-    """Build an iCal string containing only appointment events."""
+    """Build an iCal string containing only appointment events.
+
+    Each event is 15 minutes with -60min and -24h VALARM reminders.
+    Description includes lead status, LAge, notes, and Notion page link.
+    """
     cal = _new_calendar("FC Appointments — Seb")
     seen_uids: set = set()
 
@@ -57,16 +74,19 @@ def build_appointments_feed(pages: List[Dict[str, Any]]) -> str:
         lead_status = _status_text(props.get("Lead Status", {}))
         lage = _select_text(props.get("LAge", {}))
         comments = _rich_text(props.get("Aggregate Comments", {}))
+        notion_link = _notion_url(page_id)
 
         event = Event()
         event.add("uid", uid)
         event.add("summary", f"{name} — {phone}" if phone else name)
         event.add("dtstart", _to_phoenix_dt(appt_date_str))
-        event.add("duration", timedelta(hours=1))
-        event.add(
-            "description",
-            f"Status: {lead_status or 'N/A'} | LAge: {lage or 'N/A'} | {comments or ''}".strip(),
-        )
+        event.add("duration", timedelta(minutes=15))
+
+        desc_lines = [
+            f"Status: {lead_status or 'N/A'} | LAge: {lage or 'N/A'} | Notes: {comments or 'N/A'}",
+            f"Notion: {notion_link}",
+        ]
+        event.add("description", "\n".join(desc_lines))
         event.add("dtstamp", datetime.now(PHOENIX_TZ))
 
         # 60-min reminder
@@ -89,7 +109,11 @@ def build_appointments_feed(pages: List[Dict[str, Any]]) -> str:
 
 
 def build_followups_feed(pages: List[Dict[str, Any]]) -> str:
-    """Build an iCal string containing only follow-up events."""
+    """Build an iCal string containing only follow-up events.
+
+    All-day events with 8am morning VALARM reminder.
+    Description includes Notion page link.
+    """
     cal = _new_calendar("FC Follow-Ups — Seb")
     seen_uids: set = set()
 
@@ -107,6 +131,10 @@ def build_followups_feed(pages: List[Dict[str, Any]]) -> str:
         seen_uids.add(uid)
 
         name = _title_text(props.get("Name", {}))
+        lead_status = _status_text(props.get("Lead Status", {}))
+        lage = _select_text(props.get("LAge", {}))
+        comments = _rich_text(props.get("Aggregate Comments", {}))
+        notion_link = _notion_url(page_id)
 
         event = Event()
         event.add("uid", uid)
@@ -119,6 +147,11 @@ def build_followups_feed(pages: List[Dict[str, Any]]) -> str:
             event.add("dtstart", _to_phoenix_dt(fu_date_str))
             event.add("duration", timedelta(minutes=30))
 
+        desc_lines = [
+            f"Status: {lead_status or 'N/A'} | LAge: {lage or 'N/A'} | Notes: {comments or 'N/A'}",
+            f"Notion: {notion_link}",
+        ]
+        event.add("description", "\n".join(desc_lines))
         event.add("dtstamp", datetime.now(PHOENIX_TZ))
 
         # 8am morning-of reminder
