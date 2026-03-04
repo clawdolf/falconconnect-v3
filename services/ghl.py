@@ -46,6 +46,35 @@ STATE_TIMEZONES = {
 
 # ── GHL custom field IDs (verified 2026-03-04) ──
 
+# ── ZIP code → timezone lookup (pgeocode + timezonefinder, falls back to state) ──
+
+try:
+    import pgeocode
+    import pandas as pd
+    from timezonefinder import TimezoneFinder
+    _nomi = pgeocode.Nominatim('us')
+    _tf = TimezoneFinder()
+
+    def get_timezone(zip_code: str, state: str) -> Optional[str]:
+        """Look up timezone by ZIP code (lat/lon → tz), fall back to state."""
+        if zip_code:
+            try:
+                result = _nomi.query_postal_code(zip_code.strip()[:5])
+                lat = result.get('latitude') if hasattr(result, 'get') else getattr(result, 'latitude', None)
+                lon = result.get('longitude') if hasattr(result, 'get') else getattr(result, 'longitude', None)
+                if lat is not None and lon is not None and not pd.isna(lat) and not pd.isna(lon):
+                    tz = _tf.timezone_at(lat=float(lat), lng=float(lon))
+                    if tz:
+                        return tz
+            except Exception:
+                pass
+        # Fallback to state
+        return STATE_TIMEZONES.get((state or '').strip().upper())
+except ImportError:
+    def get_timezone(zip_code: str, state: str) -> Optional[str]:
+        """Fallback: state-only timezone lookup (pgeocode/timezonefinder not installed)."""
+        return STATE_TIMEZONES.get((state or '').strip().upper())
+
 GHL_CF_LENDER = "ZCmpWQ9KOdacOV2VZ4pn"
 GHL_CF_LOAN_AMOUNT = "haycapFYMCnJEFovornG"
 GHL_CF_SPOUSE_CELL = "1MKVvQCPMsAaDb8aL5vi"
@@ -229,13 +258,10 @@ async def upsert_contact(
     if lead.get("zip_code"):
         payload["postalCode"] = lead["zip_code"]
 
-    # ── Timezone from state ──
-    state_raw = lead.get("state", "")
-    if state_raw:
-        state_key = state_raw.strip().upper()
-        tz = STATE_TIMEZONES.get(state_key)
-        if tz:
-            payload["timezone"] = tz
+    # ── Timezone from ZIP code (falls back to state) ──
+    tz = get_timezone(lead.get("zip_code", ""), lead.get("state", ""))
+    if tz:
+        payload["timezone"] = tz
 
     # ── Custom fields: lender, loan amount, spouse cell, home phone ──
     custom_fields: List[Dict[str, Any]] = []
