@@ -41,6 +41,6 @@ class Settings(BaseSettings):
     plaid_env: str = "sandbox"
 
 
-@lru_cache
+@lru_cache(maxsize=1)
 def get_settings() -> Settings:
     return Settings()

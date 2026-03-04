@@ -144,11 +144,11 @@ async def run_notion_ghl_sync(
             if not ghl_contact_id:
                 # Try to find via DB xref
                 try:
-                    from db.database import async_session_factory
+                    from db.database import _get_session_factory
                     from db.models import LeadXref
                     from sqlalchemy import select
 
-                    async with async_session_factory() as session:
+                    async with _get_session_factory()() as session:
                         stmt = select(LeadXref).where(
                             LeadXref.notion_page_id == page["id"]
                         )
