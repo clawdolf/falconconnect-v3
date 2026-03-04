@@ -72,11 +72,20 @@ async def root_health():
 async def debug_env():
     """Temporary debug endpoint — checks raw env vars. Remove after verifying Clerk."""
     import os
+    from pathlib import Path
+
+    from config import get_settings
+    settings = get_settings()
     return {
         "CLERK_SECRET_KEY_set": bool(os.environ.get("CLERK_SECRET_KEY", "")),
         "CLERK_PUBLISHABLE_KEY_set": bool(os.environ.get("CLERK_PUBLISHABLE_KEY", "")),
         "CLERK_SECRET_KEY_len": len(os.environ.get("CLERK_SECRET_KEY", "")),
         "GHL_API_KEY_set": bool(os.environ.get("GHL_API_KEY", "")),
+        "settings_clerk_key_len": len(settings.clerk_secret_key),
+        "settings_clerk_pub_len": len(settings.clerk_publishable_key),
+        "etc_secrets_env_exists": Path("/etc/secrets/.env").is_file(),
+        "local_env_exists": Path(".env").is_file(),
+        "cwd": os.getcwd(),
     }
 
 
