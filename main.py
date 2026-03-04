@@ -6,7 +6,7 @@ import os
 from datetime import datetime, timezone
 
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends
 from fastapi.staticfiles import StaticFiles
 
 from db.database import init_db, get_session
