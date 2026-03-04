@@ -1,6 +1,7 @@
 """SQLAlchemy async engine, session factory, and init helper."""
 
 import logging
+import os
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -67,7 +68,7 @@ async def init_db() -> None:
     logger.info("Database tables verified / created.")
 
     # One-time migration: update old internal UUID → real Clerk user ID on licenses + agents
-    CLERK_ID = "user_3ASrwDOrSTaDxCus6f1B5lnDsgz"
+    CLERK_ID = os.environ.get("CLERK_ADMIN_USER_ID", "user_3ASrwDOrSTaDxCus6f1B5lnDsgz")
     OLD_UUID = "72dc5b7c-ba2c-4a1d-83b9-733ff600c0d5"
     from sqlalchemy import text as _text
     async with _get_session_factory()() as session:
@@ -95,7 +96,7 @@ async def init_db() -> None:
                 "Nationwide", "Securian Financial",
             ])
             seb = DBAgent(
-                user_id="user_3ASrwDOrSTaDxCus6f1B5lnDsgz",
+                user_id=os.environ.get("CLERK_ADMIN_USER_ID", "user_3ASrwDOrSTaDxCus6f1B5lnDsgz"),
                 slug="seb",
                 name="Sébastien Taillieu",
                 title="Founder & Principal Advisor",

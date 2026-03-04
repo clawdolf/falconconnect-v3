@@ -37,10 +37,12 @@ function CustomSignIn() {
   const { isLoaded, signIn, setActive } = useSignIn()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [otpCode, setOtpCode] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [step, setStep] = useState('password') // 'password' | 'otp'
 
-  async function handleSubmit(e) {
+  async function handlePasswordSubmit(e) {
     e.preventDefault()
     if (!isLoaded) return
 
@@ -55,6 +57,10 @@ function CustomSignIn() {
 
       if (result.status === 'complete') {
         await setActive({ session: result.createdSessionId })
+      } else if (result.status === 'needs_second_factor') {
+        // Clerk requires email OTP as second factor
+        await signIn.prepareSecondFactor({ strategy: 'email_code' })
+        setStep('otp')
       } else {
         setError('Sign-in incomplete. Check your credentials.')
       }
@@ -69,12 +75,104 @@ function CustomSignIn() {
     }
   }
 
+  async function handleOtpSubmit(e) {
+    e.preventDefault()
+    if (!isLoaded) return
+
+    setError('')
+    setLoading(true)
+
+    try {
+      const result = await signIn.attemptSecondFactor({
+        strategy: 'email_code',
+        code: otpCode,
+      })
+
+      if (result.status === 'complete') {
+        await setActive({ session: result.createdSessionId })
+      } else {
+        setError('Verification incomplete. Try again.')
+      }
+    } catch (err) {
+      const msg =
+        err?.errors?.[0]?.longMessage ||
+        err?.errors?.[0]?.message ||
+        'Invalid verification code.'
+      setError(msg)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleResendCode() {
+    if (!isLoaded) return
+    setError('')
+
+    try {
+      await signIn.prepareSecondFactor({ strategy: 'email_code' })
+      setError('') // Clear any previous error
+    } catch (err) {
+      const msg =
+        err?.errors?.[0]?.longMessage ||
+        err?.errors?.[0]?.message ||
+        'Failed to resend code.'
+      setError(msg)
+    }
+  }
+
   if (!isLoaded) {
     return <p className="loading-text">Loading...</p>
   }
 
+  /* ── OTP Step ── */
+  if (step === 'otp') {
+    return (
+      <form className="custom-signin-form" onSubmit={handleOtpSubmit}>
+        <label className="form-label" htmlFor="signin-otp">
+          Verification Code
+        </label>
+        <input
+          id="signin-otp"
+          className="custom-signin-input"
+          type="text"
+          inputMode="numeric"
+          autoComplete="one-time-code"
+          maxLength={6}
+          required
+          value={otpCode}
+          onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+          placeholder="000000"
+          disabled={loading}
+          autoFocus
+        />
+        <p className="custom-signin-hint">A verification code was sent to {email}</p>
+
+        <button
+          type="submit"
+          className="custom-signin-btn"
+          disabled={loading || otpCode.length < 6}
+        >
+          {loading ? 'VERIFYING...' : 'VERIFY'}
+        </button>
+
+        <button
+          type="button"
+          className="custom-signin-hint"
+          style={{ cursor: 'pointer', background: 'none', border: 'none', marginTop: '0.75rem', textDecoration: 'underline' }}
+          onClick={handleResendCode}
+          disabled={loading}
+        >
+          Resend code
+        </button>
+
+        {error && <p className="custom-signin-error">{error}</p>}
+      </form>
+    )
+  }
+
+  /* ── Password Step ── */
   return (
-    <form className="custom-signin-form" onSubmit={handleSubmit}>
+    <form className="custom-signin-form" onSubmit={handlePasswordSubmit}>
       <label className="form-label" htmlFor="signin-email">
         Email
       </label>
