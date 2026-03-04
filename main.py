@@ -106,6 +106,51 @@ async def root_health():
     }
 
 
+@app.post("/admin/seed-licenses")
+async def seed_licenses_now():
+    """One-shot: force-insert Seb's 8 licenses. Idempotent — skips existing rows."""
+    from sqlalchemy import text
+    from db.database import _get_session_factory as _sf
+
+    SEB_UID = "72dc5b7c-ba2c-4a1d-83b9-733ff600c0d5"
+    LICENSES = [
+        ("Arizona",        "AZ", None,      "https://sbs.naic.org/solar-external-lookup/lookup/licensee/summary/21408357?jurisdiction=AZ&entityType=IND&licenseType=PRO", False),
+        ("Florida",        "FL", "G258860", "https://licenseesearch.fldfs.com/Licensee/2700806", False),
+        ("Kansas",         "KS", None,      "https://sbs.naic.org/solar-external-lookup/lookup/licensee/summary/21408357?jurisdiction=KS&entityType=IND&licenseType=PRO", False),
+        ("Maine",          "ME", None,      "https://www.pfr.maine.gov/ALMSOnline/ALMSQuery/ShowDetail.aspx?DetailToken=704F3C701A9F11E086BB0F98AA047C448C67C5003D086308CD98C8424EC1769E", False),
+        ("North Carolina", "NC", None,      "https://sbs.naic.org/solar-external-lookup/lookup/licensee/summary/21408357?jurisdiction=NC&entityType=IND&licenseType=PRO", False),
+        ("Oregon",         "OR", None,      "https://sbs.naic.org/solar-external-lookup/lookup/licensee/summary/21408357?jurisdiction=OR&entityType=IND&licenseType=PRO", False),
+        ("Pennsylvania",   "PA", "1152553", "https://www.sircon.com/ComplianceExpress/Inquiry/consumerInquiry.do?nonSscrb=Y", True),
+        ("Texas",          "TX", "3317972", "https://www.sircon.com/ComplianceExpress/Inquiry/consumerInquiry.do?nonSscrb=Y", True),
+    ]
+    inserted = 0
+    skipped = 0
+    try:
+        async with _sf()() as session:
+            for state, abbr, lic_num, verify_url, manual in LICENSES:
+                result = await session.execute(
+                    text("SELECT COUNT(*) FROM licenses WHERE user_id=:uid AND state_abbreviation=:abbr"),
+                    {"uid": SEB_UID, "abbr": abbr}
+                )
+                if result.scalar() == 0:
+                    await session.execute(
+                        text(
+                            "INSERT INTO licenses (user_id, state, state_abbreviation, license_number, "
+                            "verify_url, needs_manual_verification, status, license_type, created_at, updated_at) "
+                            "VALUES (:uid,:state,:abbr,:lic_num,:verify_url,:manual,'active','insurance_producer',NOW(),NOW())"
+                        ),
+                        {"uid": SEB_UID, "state": state, "abbr": abbr, "lic_num": lic_num,
+                         "verify_url": verify_url, "manual": manual}
+                    )
+                    inserted += 1
+                else:
+                    skipped += 1
+            await session.commit()
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+    return {"ok": True, "inserted": inserted, "skipped": skipped}
+
+
 @app.get("/debug/env")
 async def debug_env():
     """Temporary debug endpoint — checks raw env vars. Remove after verifying Clerk."""
