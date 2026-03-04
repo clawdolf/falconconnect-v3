@@ -138,14 +138,14 @@ def build_followups_feed(pages: List[Dict[str, Any]]) -> str:
 
         event = Event()
         event.add("uid", uid)
-        event.add("summary", f"Follow Up — {name}")
+        event.add("summary", name)
 
         fu_date = _parse_date_only(fu_date_str)
         if fu_date:
             event.add("dtstart", fu_date)  # all-day event
         else:
             event.add("dtstart", _to_phoenix_dt(fu_date_str))
-            event.add("duration", timedelta(minutes=30))
+            event.add("duration", timedelta(minutes=15))
 
         desc_lines = [
             f"Status: {lead_status or 'N/A'} | LAge: {lage or 'N/A'} | Notes: {comments or 'N/A'}",
