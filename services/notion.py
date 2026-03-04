@@ -225,24 +225,22 @@ async def update_page(page_id: str, properties: Dict[str, Any]) -> None:
         logger.info("Notion page %s updated", page_id)
 
 
-async def get_upcoming_events(days: int = 90) -> List[Dict[str, Any]]:
-    """Query Notion for leads with Appointment Date or Follow-Up Date in the next N days.
+# ---------------------------------------------------------------------------
+# Calendar queries — split into appointments-only and follow-ups-only
+# ---------------------------------------------------------------------------
 
-    Returns a flat list of event dicts tagged with event_type.
+async def get_upcoming_appointments(days: int = 90) -> List[Dict[str, Any]]:
+    """Query Notion for leads with Appointment Date in the next N days.
+
+    Returns pages tagged with _event_type="appointment".
     """
     settings = get_settings()
     today = datetime.now(timezone.utc).date()
-    future = today + timedelta(days=days)
 
-    events: List[Dict[str, Any]] = []
-
-    # Query for Appointment Date
-    appt_payload = {
+    payload = {
         "filter": {
             "property": "Appointment Date",
-            "date": {
-                "on_or_after": today.isoformat(),
-            },
+            "date": {"on_or_after": today.isoformat()},
         },
         "page_size": 100,
     }
@@ -251,21 +249,26 @@ async def get_upcoming_events(days: int = 90) -> List[Dict[str, Any]]:
         resp = await client.post(
             f"{NOTION_BASE}/databases/{settings.notion_leads_db_id}/query",
             headers=_headers(),
-            json=appt_payload,
+            json=payload,
         )
         resp.raise_for_status()
-        for page in resp.json().get("results", []):
-            appt_date = _date_value(page.get("properties", {}).get("Appointment Date", {}))
-            if appt_date:
-                events.append({**page, "_event_type": "appointment"})
+        pages = resp.json().get("results", [])
 
-    # Query for Follow-Up Date
-    fu_payload = {
+    return [{**p, "_event_type": "appointment"} for p in pages if _date_value(p.get("properties", {}).get("Appointment Date", {}))]
+
+
+async def get_upcoming_followups(days: int = 90) -> List[Dict[str, Any]]:
+    """Query Notion for leads with Follow-Up Date in the next N days.
+
+    Returns pages tagged with _event_type="followup".
+    """
+    settings = get_settings()
+    today = datetime.now(timezone.utc).date()
+
+    payload = {
         "filter": {
             "property": "Follow Up Date",
-            "date": {
-                "on_or_after": today.isoformat(),
-            },
+            "date": {"on_or_after": today.isoformat()},
         },
         "page_size": 100,
     }
@@ -274,21 +277,19 @@ async def get_upcoming_events(days: int = 90) -> List[Dict[str, Any]]:
         resp = await client.post(
             f"{NOTION_BASE}/databases/{settings.notion_leads_db_id}/query",
             headers=_headers(),
-            json=fu_payload,
+            json=payload,
         )
         resp.raise_for_status()
-        for page in resp.json().get("results", []):
-            fu_date = _date_value(page.get("properties", {}).get("Follow Up Date", {}))
-            if fu_date:
-                # Only add if not already in events as an appointment
-                existing_ids = {e["id"] for e in events}
-                if page["id"] not in existing_ids:
-                    events.append({**page, "_event_type": "followup"})
-                else:
-                    # Page has both — add a followup entry too
-                    events.append({**page, "_event_type": "followup"})
+        pages = resp.json().get("results", [])
 
-    return events
+    return [{**p, "_event_type": "followup"} for p in pages if _date_value(p.get("properties", {}).get("Follow Up Date", {}))]
+
+
+async def get_upcoming_events(days: int = 90) -> List[Dict[str, Any]]:
+    """Query both appointment and follow-up events (convenience wrapper)."""
+    appts = await get_upcoming_appointments(days)
+    fups = await get_upcoming_followups(days)
+    return appts + fups
 
 
 async def poll_recent_changes(minutes: int = 6) -> List[Dict[str, Any]]:

@@ -1,6 +1,6 @@
 # FalconConnect v3
 
-**Middleware layer for Falcon Financial** — dual GHL + Notion sync, iCal feed, analytics hub.
+**Middleware layer for Falcon Financial** — dual GHL + Notion sync, iCal feeds, analytics hub.
 
 ## Architecture
 
@@ -11,7 +11,7 @@ FalconConnect v3 is a clean FastAPI middleware that sits between:
 It provides:
 - **Dual-push lead capture** — one POST, both systems updated
 - **GHL → Notion webhook bridge** — appointments, stage changes, DNC mirrored automatically
-- **iCal feed** — subscribe in any calendar app to see upcoming appointments and follow-ups
+- **Two iCal feeds** — appointments and follow-ups as separate subscribable calendars
 - **Analytics API** — daily production metrics (dials, contacts, appts, closes, premium)
 
 ## Quick Start
@@ -39,14 +39,28 @@ alembic upgrade head
 
 | Method | Path | Description |
 |--------|------|-------------|
+| `GET` | `/health` | Root liveness probe |
 | `POST` | `/api/public/leads/capture` | Capture lead → GHL + Notion |
 | `POST` | `/api/webhooks/ghl` | GHL webhook receiver → Notion sync |
-| `GET` | `/api/calendar/seb.ics?token=...` | iCal feed from Notion |
+| `GET` | `/api/calendar/appointments.ics?token=...` | iCal feed — appointments only |
+| `GET` | `/api/calendar/followups.ics?token=...` | iCal feed — follow-ups only |
 | `GET` | `/api/analytics/daily` | Daily production metrics |
 | `GET` | `/api/analytics/summary` | Aggregated summary |
-| `GET` | `/api/admin/health` | Liveness probe |
+| `GET` | `/api/admin/health` | Admin liveness probe |
 | `GET` | `/api/admin/health/db` | Database connectivity |
 | `GET` | `/api/admin/version` | Version info |
+
+### Calendar Feeds
+
+Two separate iCal feeds so you can subscribe independently with different colors:
+
+- **Appointments** — timed 1-hour events, 60-min + 24-hour reminders
+  `GET /api/calendar/appointments.ics?token={CALENDAR_SECRET}`
+
+- **Follow-Ups** — all-day events, 8am morning reminder
+  `GET /api/calendar/followups.ics?token={CALENDAR_SECRET}`
+
+Both secured with the same `CALENDAR_SECRET` token.
 
 ## Project Structure
 
@@ -56,13 +70,13 @@ alembic upgrade head
 ├── routers/             # API route handlers
 │   ├── leads.py         # Lead capture (dual push)
 │   ├── webhooks.py      # GHL → Notion bridge
-│   ├── calendar.py      # iCal feed
+│   ├── calendar.py      # iCal feeds (appointments + follow-ups)
 │   ├── analytics.py     # Production metrics
 │   └── admin.py         # Health + version
 ├── services/            # External API clients
 │   ├── ghl.py           # GoHighLevel API
 │   ├── notion.py        # Notion API
-│   ├── calendar.py      # iCal generation
+│   ├── calendar.py      # iCal generation (two builders)
 │   └── plaid.py         # Plaid (Phase 2 stub)
 ├── models/              # Pydantic models
 │   ├── lead.py          # LeadPayload

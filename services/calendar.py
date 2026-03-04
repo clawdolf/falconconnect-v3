@@ -1,4 +1,8 @@
-"""iCal generation service — builds .ics feed from Notion appointment data.
+"""iCal generation service — builds .ics feeds from Notion data.
+
+Two separate feeds:
+  - Appointments: timed 1-hour events with -60min and -24h alarms
+  - Follow-ups:   all-day events with 8am morning alarm
 
 Uses real Notion property names:
   Name (title), Mobile Phone (phone_number), Lead Status (status),
@@ -8,7 +12,7 @@ Uses real Notion property names:
 
 import logging
 from datetime import datetime, timedelta, date
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Literal
 
 import pytz
 from icalendar import Calendar, Event, Alarm
@@ -18,25 +22,35 @@ logger = logging.getLogger("falconconnect.calendar")
 PHOENIX_TZ = pytz.timezone("America/Phoenix")
 
 
-def build_ical_feed(events: List[Dict[str, Any]]) -> str:
-    """Build a valid iCalendar string from Notion page results.
-
-    Each event dict has an `_event_type` key: "appointment" or "followup".
-    """
+def _new_calendar(cal_name: str) -> Calendar:
+    """Create a fresh iCalendar object with standard headers."""
     cal = Calendar()
     cal.add("prodid", "-//FalconConnect v3//falconfinancial.org//")
     cal.add("version", "2.0")
     cal.add("calscale", "GREGORIAN")
     cal.add("method", "PUBLISH")
-    cal.add("x-wr-calname", "FalconConnect — Seb")
+    cal.add("x-wr-calname", cal_name)
     cal.add("x-wr-timezone", "America/Phoenix")
+    return cal
 
-    seen_uids = set()
 
-    for page in events:
+def build_appointments_feed(pages: List[Dict[str, Any]]) -> str:
+    """Build an iCal string containing only appointment events."""
+    cal = _new_calendar("FC Appointments — Seb")
+    seen_uids: set = set()
+
+    for page in pages:
         props = page.get("properties", {})
         page_id = page.get("id", "unknown")
-        event_type = page.get("_event_type", "appointment")
+
+        appt_date_str = _date_value(props.get("Appointment Date", {}))
+        if not appt_date_str:
+            continue
+
+        uid = f"appt-{page_id}@falconconnect"
+        if uid in seen_uids:
+            continue
+        seen_uids.add(uid)
 
         name = _title_text(props.get("Name", {}))
         phone = _phone(props.get("Mobile Phone", {}))
@@ -44,75 +58,77 @@ def build_ical_feed(events: List[Dict[str, Any]]) -> str:
         lage = _select_text(props.get("LAge", {}))
         comments = _rich_text(props.get("Aggregate Comments", {}))
 
-        if event_type == "appointment":
-            appt_date_str = _date_value(props.get("Appointment Date", {}))
-            if not appt_date_str:
-                continue
+        event = Event()
+        event.add("uid", uid)
+        event.add("summary", f"{name} — {phone}" if phone else name)
+        event.add("dtstart", _to_phoenix_dt(appt_date_str))
+        event.add("duration", timedelta(hours=1))
+        event.add(
+            "description",
+            f"Status: {lead_status or 'N/A'} | LAge: {lage or 'N/A'} | {comments or ''}".strip(),
+        )
+        event.add("dtstamp", datetime.now(PHOENIX_TZ))
 
-            uid = f"appt-{page_id}@falconconnect"
-            if uid in seen_uids:
-                continue
-            seen_uids.add(uid)
+        # 60-min reminder
+        a60 = Alarm()
+        a60.add("action", "DISPLAY")
+        a60.add("trigger", timedelta(minutes=-60))
+        a60.add("description", f"Appointment in 1 hour: {name}")
+        event.add_component(a60)
 
-            event = Event()
-            event.add("uid", uid)
-            summary = f"{name} — {phone}" if phone else name
-            event.add("summary", summary)
-            event.add("dtstart", _to_phoenix_dt(appt_date_str))
-            event.add("duration", timedelta(hours=1))
-            event.add(
-                "description",
-                f"Status: {lead_status or 'N/A'} | LAge: {lage or 'N/A'} | {comments or ''}".strip(),
-            )
-            event.add("dtstamp", datetime.now(PHOENIX_TZ))
+        # 24-hour reminder
+        a24 = Alarm()
+        a24.add("action", "DISPLAY")
+        a24.add("trigger", timedelta(hours=-24))
+        a24.add("description", f"Appointment tomorrow: {name}")
+        event.add_component(a24)
 
-            # 60-min reminder
-            alarm60 = Alarm()
-            alarm60.add("action", "DISPLAY")
-            alarm60.add("trigger", timedelta(minutes=-60))
-            alarm60.add("description", f"Appointment in 1 hour: {name}")
-            event.add_component(alarm60)
+        cal.add_component(event)
 
-            # 24-hour reminder
-            alarm24 = Alarm()
-            alarm24.add("action", "DISPLAY")
-            alarm24.add("trigger", timedelta(hours=-24))
-            alarm24.add("description", f"Appointment tomorrow: {name}")
-            event.add_component(alarm24)
+    return cal.to_ical().decode("utf-8")
 
-            cal.add_component(event)
 
-        elif event_type == "followup":
-            fu_date_str = _date_value(props.get("Follow Up Date", {}))
-            if not fu_date_str:
-                continue
+def build_followups_feed(pages: List[Dict[str, Any]]) -> str:
+    """Build an iCal string containing only follow-up events."""
+    cal = _new_calendar("FC Follow-Ups — Seb")
+    seen_uids: set = set()
 
-            uid = f"followup-{page_id}@falconconnect"
-            if uid in seen_uids:
-                continue
-            seen_uids.add(uid)
+    for page in pages:
+        props = page.get("properties", {})
+        page_id = page.get("id", "unknown")
 
-            event = Event()
-            event.add("uid", uid)
-            event.add("summary", f"Follow Up — {name}")
+        fu_date_str = _date_value(props.get("Follow Up Date", {}))
+        if not fu_date_str:
+            continue
 
-            fu_date = _parse_date_only(fu_date_str)
-            if fu_date:
-                event.add("dtstart", fu_date)  # all-day event (date, not datetime)
-            else:
-                event.add("dtstart", _to_phoenix_dt(fu_date_str))
-                event.add("duration", timedelta(minutes=30))
+        uid = f"followup-{page_id}@falconconnect"
+        if uid in seen_uids:
+            continue
+        seen_uids.add(uid)
 
-            event.add("dtstamp", datetime.now(PHOENIX_TZ))
+        name = _title_text(props.get("Name", {}))
 
-            # 8am morning reminder (for all-day events, TRIGGER is relative to start of day)
-            alarm_morning = Alarm()
-            alarm_morning.add("action", "DISPLAY")
-            alarm_morning.add("trigger", timedelta(hours=8))  # 8am on the day
-            alarm_morning.add("description", f"Follow up today: {name}")
-            event.add_component(alarm_morning)
+        event = Event()
+        event.add("uid", uid)
+        event.add("summary", f"Follow Up — {name}")
 
-            cal.add_component(event)
+        fu_date = _parse_date_only(fu_date_str)
+        if fu_date:
+            event.add("dtstart", fu_date)  # all-day event
+        else:
+            event.add("dtstart", _to_phoenix_dt(fu_date_str))
+            event.add("duration", timedelta(minutes=30))
+
+        event.add("dtstamp", datetime.now(PHOENIX_TZ))
+
+        # 8am morning-of reminder
+        a_morning = Alarm()
+        a_morning.add("action", "DISPLAY")
+        a_morning.add("trigger", timedelta(hours=8))  # 8am on the day
+        a_morning.add("description", f"Follow up today: {name}")
+        event.add_component(a_morning)
+
+        cal.add_component(event)
 
     return cal.to_ical().decode("utf-8")
 
@@ -120,19 +136,13 @@ def build_ical_feed(events: List[Dict[str, Any]]) -> str:
 # --- Property extractors matching real Notion schema ---
 
 def _title_text(prop: Dict[str, Any]) -> str:
-    """Extract plain text from a Notion title property."""
     items = prop.get("title", [])
-    if items:
-        return "".join(item.get("plain_text", "") for item in items)
-    return ""
+    return "".join(item.get("plain_text", "") for item in items) if items else ""
 
 
 def _rich_text(prop: Dict[str, Any]) -> str:
-    """Extract plain text from a Notion rich_text property."""
     items = prop.get("rich_text", [])
-    if items:
-        return "".join(item.get("plain_text", "") for item in items)
-    return ""
+    return "".join(item.get("plain_text", "") for item in items) if items else ""
 
 
 def _phone(prop: Dict[str, Any]) -> str:
@@ -140,38 +150,22 @@ def _phone(prop: Dict[str, Any]) -> str:
 
 
 def _status_text(prop: Dict[str, Any]) -> str:
-    """Extract name from a Notion status property."""
     status = prop.get("status")
-    if status:
-        return status.get("name", "")
-    return ""
+    return status.get("name", "") if status else ""
 
 
 def _select_text(prop: Dict[str, Any]) -> str:
-    """Extract name from a Notion select property."""
     sel = prop.get("select")
-    if sel:
-        return sel.get("name", "")
-    return ""
-
-
-def _number_text(prop: Dict[str, Any]) -> str:
-    val = prop.get("number")
-    return str(val) if val is not None else ""
+    return sel.get("name", "") if sel else ""
 
 
 def _date_value(prop: Dict[str, Any]) -> str:
-    """Extract the start date string from a Notion date property."""
     date_obj = prop.get("date")
-    if date_obj:
-        return date_obj.get("start", "")
-    return ""
+    return date_obj.get("start", "") if date_obj else ""
 
 
 def _to_phoenix_dt(date_str: str) -> datetime:
-    """Parse an ISO date/datetime string into a Phoenix-timezone datetime."""
     from dateutil import parser as dtparser
-
     dt = dtparser.parse(date_str)
     if dt.tzinfo is None:
         dt = PHOENIX_TZ.localize(dt)
@@ -179,8 +173,7 @@ def _to_phoenix_dt(date_str: str) -> datetime:
 
 
 def _parse_date_only(date_str: str):
-    """If the string is a date-only (no time component), return a date object."""
-    if len(date_str) == 10:  # YYYY-MM-DD
+    if len(date_str) == 10:
         try:
             return date.fromisoformat(date_str)
         except ValueError:
