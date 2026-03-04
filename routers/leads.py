@@ -47,6 +47,7 @@ class BulkImportRequest(BaseModel):
     """Request body for POST /leads/bulk."""
 
     leads: List[BulkLeadItem]
+    dry_run: bool = False
 
 
 class BulkImportError(BaseModel):
@@ -96,6 +97,11 @@ async def bulk_import_leads(
                     lage_months = calculate_lage(item.mail_date)
                 except Exception:
                     pass
+
+            # Dry run — validate only, skip all external writes
+            if req.dry_run:
+                created += 1
+                continue
 
             # Push to GHL
             ghl_contact = await ghl.upsert_contact(lead_dict)
