@@ -122,6 +122,7 @@ function LeadImport() {
   const [progress, setProgress] = useState({ current: 0, total: 0 })
   const [result, setResult] = useState(null)
   const [error, setError] = useState(null)
+  const [dryRun, setDryRun] = useState(false)
 
   // Auth (Clerk optional)
   let getToken = null
@@ -197,7 +198,7 @@ function LeadImport() {
     for (let i = 0; i < leads.length; i += BS) {
       const batch = leads.slice(i, i + BS)
       try {
-        const resp = await fetch('/api/public/leads/bulk', { method: 'POST', headers: hdrs, body: JSON.stringify({ leads: batch }) })
+        const resp = await fetch('/api/public/leads/bulk', { method: 'POST', headers: hdrs, body: JSON.stringify({ leads: batch, dry_run: dryRun }) })
         if (resp.ok) { const d = await resp.json(); created += d.created || 0; failed += d.failed || 0; if (d.errors) errors.push(...d.errors) }
         else {
           for (const l of batch) {
@@ -234,6 +235,29 @@ function LeadImport() {
   return (
     <div className="dashboard">
       <section className="section">
+        {/* Dry Run Toggle */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem', padding: '0.625rem 0.875rem', background: dryRun ? 'oklch(18% 0.06 85 / 0.6)' : 'var(--surface)', border: '1px solid ' + (dryRun ? 'var(--accent)' : 'var(--border)'), borderRadius: 3 }}>
+          <button
+            onClick={() => setDryRun(d => !d)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: '0.5rem',
+              background: dryRun ? 'var(--accent)' : 'var(--bg)',
+              color: dryRun ? 'oklch(15% 0.01 85)' : 'var(--text-muted)',
+              border: '1px solid ' + (dryRun ? 'var(--accent)' : 'var(--border)'),
+              borderRadius: 3, padding: '0.3rem 0.75rem',
+              fontFamily: 'var(--font-display)', fontSize: '0.75rem', fontWeight: 700,
+              letterSpacing: '0.06em', textTransform: 'uppercase', cursor: 'pointer',
+              transition: 'all 0.15s'
+            }}
+          >
+            <span style={{ width: 10, height: 10, borderRadius: '50%', background: dryRun ? 'oklch(15% 0.01 85)' : 'var(--border)', display: 'inline-block', transition: 'all 0.15s' }} />
+            {dryRun ? 'DRY RUN ON' : 'DRY RUN OFF'}
+          </button>
+          <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.7rem', color: dryRun ? 'var(--accent)' : 'var(--text-muted)' }}>
+            {dryRun ? 'Wizard and menus work — no data will be sent to GHL or Notion' : 'Live mode — imports will write to GHL and Notion'}
+          </span>
+        </div>
+
         {/* Header row */}
         <div className="section-header-row" style={{ marginBottom: '0.25rem' }}>
           {step !== 'source' && step !== 'importing' && step !== 'results' && (
@@ -431,7 +455,8 @@ function LeadImport() {
           <div>
             <div style={{ textAlign: 'center', padding: '1.5rem 0' }}>
               <div style={{ width: 48, height: 48, borderRadius: '50%', background: result.failed === 0 ? 'oklch(18% 0.04 145)' : 'oklch(18% 0.04 75)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 0.75rem', color: result.failed === 0 ? 'var(--green)' : 'var(--amber)', fontSize: '1.5rem' }}>{result.failed === 0 ? '✓' : '!'}</div>
-              <h3 className="section-title" style={{ borderBottom: 'none', marginBottom: '0.25rem' }}>Import Complete</h3>
+              <h3 className="section-title" style={{ borderBottom: 'none', marginBottom: '0.25rem' }}>{dryRun ? 'Dry Run Complete' : 'Import Complete'}</h3>
+              {dryRun && <div style={{ display: 'inline-block', fontFamily: 'var(--font-mono)', fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'oklch(15% 0.01 85)', background: 'var(--accent)', borderRadius: 3, padding: '0.15rem 0.5rem', marginBottom: '0.5rem' }}>DRY RUN — No data was written</div>}
               <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8rem', display: 'flex', justifyContent: 'center', gap: '1.5rem', marginTop: '0.5rem' }}>
                 <span style={{ color: 'var(--green)' }}>{result.created} created</span>
                 {result.failed > 0 && <span style={{ color: 'var(--red)' }}>{result.failed} failed</span>}
