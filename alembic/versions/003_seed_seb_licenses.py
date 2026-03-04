@@ -1,148 +1,46 @@
-"""Seed Seb's 8 active insurance licenses (migrated from v2 prod DB).
+"""Seed Seb's 8 active insurance licenses — v2 prod DB migration.
 
-NPN: 21408357
-User ID: 72dc5b7c-ba2c-4a1d-83b9-733ff600c0d5
+NPN: 21408357  |  User ID: 72dc5b7c-ba2c-4a1d-83b9-733ff600c0d5
 
 Revision ID: 003_seed_seb_licenses
 Revises: 002_licenses
 Create Date: 2026-03-04
 """
 from alembic import op
-import sqlalchemy as sa
 
-# revision identifiers, used by Alembic.
 revision = "003_seed_seb_licenses"
 down_revision = "002_licenses"
 branch_labels = None
 depends_on = None
 
-SEB_USER_ID = "72dc5b7c-ba2c-4a1d-83b9-733ff600c0d5"
-
-LICENSES = [
-    {
-        "user_id": SEB_USER_ID,
-        "state": "Arizona",
-        "state_abbreviation": "AZ",
-        "license_number": None,
-        "verify_url": "https://sbs.naic.org/solar-external-lookup/lookup/licensee/summary/21408357?jurisdiction=AZ&entityType=IND&licenseType=PRO",
-        "needs_manual_verification": False,
-        "status": "active",
-        "license_type": "insurance_producer",
-    },
-    {
-        "user_id": SEB_USER_ID,
-        "state": "Florida",
-        "state_abbreviation": "FL",
-        "license_number": "G258860",
-        "verify_url": "https://licenseesearch.fldfs.com/Licensee/2700806",
-        "needs_manual_verification": False,
-        "status": "active",
-        "license_type": "insurance_producer",
-    },
-    {
-        "user_id": SEB_USER_ID,
-        "state": "Kansas",
-        "state_abbreviation": "KS",
-        "license_number": None,
-        "verify_url": "https://sbs.naic.org/solar-external-lookup/lookup/licensee/summary/21408357?jurisdiction=KS&entityType=IND&licenseType=PRO",
-        "needs_manual_verification": False,
-        "status": "active",
-        "license_type": "insurance_producer",
-    },
-    {
-        "user_id": SEB_USER_ID,
-        "state": "Maine",
-        "state_abbreviation": "ME",
-        "license_number": None,
-        "verify_url": "https://www.pfr.maine.gov/ALMSOnline/ALMSQuery/ShowDetail.aspx?DetailToken=704F3C701A9F11E086BB0F98AA047C448C67C5003D086308CD98C8424EC1769E",
-        "needs_manual_verification": False,
-        "status": "active",
-        "license_type": "insurance_producer",
-    },
-    {
-        "user_id": SEB_USER_ID,
-        "state": "North Carolina",
-        "state_abbreviation": "NC",
-        "license_number": None,
-        "verify_url": "https://sbs.naic.org/solar-external-lookup/lookup/licensee/summary/21408357?jurisdiction=NC&entityType=IND&licenseType=PRO",
-        "needs_manual_verification": False,
-        "status": "active",
-        "license_type": "insurance_producer",
-    },
-    {
-        "user_id": SEB_USER_ID,
-        "state": "Oregon",
-        "state_abbreviation": "OR",
-        "license_number": None,
-        "verify_url": "https://sbs.naic.org/solar-external-lookup/lookup/licensee/summary/21408357?jurisdiction=OR&entityType=IND&licenseType=PRO",
-        "needs_manual_verification": False,
-        "status": "active",
-        "license_type": "insurance_producer",
-    },
-    {
-        "user_id": SEB_USER_ID,
-        "state": "Pennsylvania",
-        "state_abbreviation": "PA",
-        "license_number": "1152553",
-        "verify_url": "https://www.sircon.com/ComplianceExpress/Inquiry/consumerInquiry.do?nonSscrb=Y",
-        "needs_manual_verification": True,
-        "status": "active",
-        "license_type": "insurance_producer",
-    },
-    {
-        "user_id": SEB_USER_ID,
-        "state": "Texas",
-        "state_abbreviation": "TX",
-        "license_number": "3317972",
-        "verify_url": "https://www.sircon.com/ComplianceExpress/Inquiry/consumerInquiry.do?nonSscrb=Y",
-        "needs_manual_verification": True,
-        "status": "active",
-        "license_type": "insurance_producer",
-    },
-]
-
-# Define a table reference for bulk insert (no ORM needed)
-licenses_table = sa.table(
-    "licenses",
-    sa.column("user_id", sa.String),
-    sa.column("state", sa.String),
-    sa.column("state_abbreviation", sa.String),
-    sa.column("license_number", sa.String),
-    sa.column("verify_url", sa.String),
-    sa.column("needs_manual_verification", sa.Boolean),
-    sa.column("status", sa.String),
-    sa.column("license_type", sa.String),
-)
+SEB_UID = "72dc5b7c-ba2c-4a1d-83b9-733ff600c0d5"
 
 
 def upgrade() -> None:
-    conn = op.get_bind()
-    for lic in LICENSES:
-        # Idempotent: skip if already exists
-        result = conn.execute(
-            sa.text(
-                "SELECT COUNT(*) FROM licenses "
-                "WHERE user_id = :uid AND state_abbreviation = :abbr"
-            ),
-            {"uid": lic["user_id"], "abbr": lic["state_abbreviation"]},
+    # All values are hardcoded constants — safe to interpolate directly.
+    # Using op.execute(str) is the correct modern pattern (no get_bind, no bindparams).
+    rows = [
+        ("Arizona",        "AZ", "NULL",      "https://sbs.naic.org/solar-external-lookup/lookup/licensee/summary/21408357?jurisdiction=AZ&entityType=IND&licenseType=PRO", "false"),
+        ("Florida",        "FL", "'G258860'", "https://licenseesearch.fldfs.com/Licensee/2700806", "false"),
+        ("Kansas",         "KS", "NULL",      "https://sbs.naic.org/solar-external-lookup/lookup/licensee/summary/21408357?jurisdiction=KS&entityType=IND&licenseType=PRO", "false"),
+        ("Maine",          "ME", "NULL",      "https://www.pfr.maine.gov/ALMSOnline/ALMSQuery/ShowDetail.aspx?DetailToken=704F3C701A9F11E086BB0F98AA047C448C67C5003D086308CD98C8424EC1769E", "false"),
+        ("North Carolina", "NC", "NULL",      "https://sbs.naic.org/solar-external-lookup/lookup/licensee/summary/21408357?jurisdiction=NC&entityType=IND&licenseType=PRO", "false"),
+        ("Oregon",         "OR", "NULL",      "https://sbs.naic.org/solar-external-lookup/lookup/licensee/summary/21408357?jurisdiction=OR&entityType=IND&licenseType=PRO", "false"),
+        ("Pennsylvania",   "PA", "'1152553'", "https://www.sircon.com/ComplianceExpress/Inquiry/consumerInquiry.do?nonSscrb=Y", "true"),
+        ("Texas",          "TX", "'3317972'", "https://www.sircon.com/ComplianceExpress/Inquiry/consumerInquiry.do?nonSscrb=Y", "true"),
+    ]
+    for state, abbr, lic_num, verify_url, manual in rows:
+        op.execute(
+            f"INSERT INTO licenses "
+            f"(user_id, state, state_abbreviation, license_number, verify_url, "
+            f"needs_manual_verification, status, license_type, created_at, updated_at) "
+            f"SELECT '{SEB_UID}', '{state}', '{abbr}', {lic_num}, '{verify_url}', "
+            f"{manual}, 'active', 'insurance_producer', NOW(), NOW() "
+            f"WHERE NOT EXISTS ("
+            f"  SELECT 1 FROM licenses WHERE user_id='{SEB_UID}' AND state_abbreviation='{abbr}'"
+            f")"
         )
-        if result.scalar() == 0:
-            conn.execute(
-                sa.text(
-                    "INSERT INTO licenses "
-                    "(user_id, state, state_abbreviation, license_number, verify_url, "
-                    "needs_manual_verification, status, license_type, created_at, updated_at) "
-                    "VALUES "
-                    "(:user_id, :state, :state_abbreviation, :license_number, :verify_url, "
-                    ":needs_manual_verification, :status, :license_type, NOW(), NOW())"
-                ),
-                lic,
-            )
 
 
 def downgrade() -> None:
-    conn = op.get_bind()
-    conn.execute(
-        sa.text("DELETE FROM licenses WHERE user_id = :uid"),
-        {"uid": SEB_USER_ID},
-    )
+    op.execute(f"DELETE FROM licenses WHERE user_id='{SEB_UID}'")
