@@ -6,6 +6,8 @@ Pipeline/stage IDs fetched and cached at startup.
 """
 
 import logging
+import re
+from datetime import date
 from typing import Any, Dict, List, Optional
 
 import httpx
@@ -19,6 +21,74 @@ GHL_API_VERSION = "2021-07-28"
 
 # Cached pipeline data — populated on first use
 _pipeline_cache: Optional[List[Dict[str, Any]]] = None
+
+# ── State → timezone mapping (all 50 US states) ──
+
+STATE_TIMEZONES = {
+    "AL": "America/Chicago", "AK": "America/Anchorage", "AZ": "America/Phoenix",
+    "AR": "America/Chicago", "CA": "America/Los_Angeles", "CO": "America/Denver",
+    "CT": "America/New_York", "DE": "America/New_York", "FL": "America/New_York",
+    "GA": "America/New_York", "HI": "Pacific/Honolulu", "ID": "America/Denver",
+    "IL": "America/Chicago", "IN": "America/Indiana/Indianapolis", "IA": "America/Chicago",
+    "KS": "America/Chicago", "KY": "America/Kentucky/Louisville", "LA": "America/Chicago",
+    "ME": "America/New_York", "MD": "America/New_York", "MA": "America/New_York",
+    "MI": "America/Detroit", "MN": "America/Chicago", "MS": "America/Chicago",
+    "MO": "America/Chicago", "MT": "America/Denver", "NE": "America/Chicago",
+    "NV": "America/Los_Angeles", "NH": "America/New_York", "NJ": "America/New_York",
+    "NM": "America/Denver", "NY": "America/New_York", "NC": "America/New_York",
+    "ND": "America/Chicago", "OH": "America/New_York", "OK": "America/Chicago",
+    "OR": "America/Los_Angeles", "PA": "America/New_York", "RI": "America/New_York",
+    "SC": "America/New_York", "SD": "America/Chicago", "TN": "America/Chicago",
+    "TX": "America/Chicago", "UT": "America/Denver", "VT": "America/New_York",
+    "VA": "America/New_York", "WA": "America/Los_Angeles", "WV": "America/New_York",
+    "WI": "America/Chicago", "WY": "America/Denver",
+}
+
+# ── GHL custom field IDs (verified 2026-03-04) ──
+
+GHL_CF_LENDER = "ZCmpWQ9KOdacOV2VZ4pn"
+GHL_CF_LOAN_AMOUNT = "haycapFYMCnJEFovornG"
+GHL_CF_SPOUSE_CELL = "1MKVvQCPMsAaDb8aL5vi"
+GHL_CF_HPHONE = "za04O6KtX9Sg3yn8csZi"
+
+
+# ── Phone normalization utilities ──
+
+
+def normalize_phone(raw: str) -> str:
+    """Normalize a phone number to E.164 format (+1XXXXXXXXXX for US).
+
+    Strips dashes, spaces, dots, parentheses. Adds +1 if missing.
+    Returns empty string if input is not a valid-looking US number.
+    """
+    if not raw:
+        return ""
+    digits = re.sub(r"[^\d]", "", raw.strip())
+    if len(digits) == 11 and digits.startswith("1"):
+        return f"+{digits}"
+    if len(digits) == 10:
+        return f"+1{digits}"
+    # Already has country code or non-standard length — return as-is with +
+    if len(digits) >= 10:
+        return f"+{digits}" if not digits.startswith("+") else digits
+    return ""
+
+
+def split_phone_field(raw: str) -> List[str]:
+    """Split a phone field that may contain multiple numbers separated by / , ;.
+
+    Returns a list of normalized phone numbers (empty strings filtered out).
+    """
+    if not raw:
+        return []
+    # Split on common delimiters
+    parts = re.split(r"[/,;]+", raw)
+    result = []
+    for part in parts:
+        normalized = normalize_phone(part)
+        if normalized:
+            result.append(normalized)
+    return result
 
 
 def _headers() -> Dict[str, str]:
@@ -73,17 +143,18 @@ async def _find_stage(stage_name: str, pipeline_name: Optional[str] = None) -> D
                     "stageName": stage["name"],
                 }
 
-    # Default: FEX Leads → New Lead
-    for pipeline in pipelines:
-        if "fex" in pipeline["name"].lower():
-            if pipeline.get("stages"):
-                first = pipeline["stages"][0]
-                return {
-                    "pipelineId": pipeline["id"],
-                    "stageId": first["id"],
-                    "pipelineName": pipeline["name"],
-                    "stageName": first["name"],
-                }
+    # Default: MTG Leads → first stage (Mortgage Protection pipeline)
+    for keyword in ("mtg", "mortgage"):
+        for pipeline in pipelines:
+            if keyword in pipeline["name"].lower():
+                if pipeline.get("stages"):
+                    first = pipeline["stages"][0]
+                    return {
+                        "pipelineId": pipeline["id"],
+                        "stageId": first["id"],
+                        "pipelineName": pipeline["name"],
+                        "stageName": first["name"],
+                    }
 
     # Last resort: first pipeline, first stage
     if pipelines and pipelines[0].get("stages"):
@@ -106,17 +177,46 @@ async def upsert_contact(
     """Create or update a GHL contact.
 
     Uses the /contacts/upsert endpoint which handles dedup by phone/email.
+    Enriches with: timezone, lender/loan amount custom fields, phone
+    normalization + splitting, and import date tag.
     Returns the full contact object from GHL.
     """
     settings = get_settings()
     loc_id = location_id or settings.ghl_location_id
 
+    # ── Phone normalization + splitting ──
+    # The primary phone field may contain multiple numbers (e.g. "5555555555/4443331234")
+    raw_phone = lead.get("phone", "")
+    phone_numbers = split_phone_field(raw_phone)
+    primary_phone = phone_numbers[0] if phone_numbers else normalize_phone(raw_phone)
+    secondary_phone = phone_numbers[1] if len(phone_numbers) > 1 else ""
+
+    # Also check dedicated phone fields from the lead model
+    home_phone = normalize_phone(lead.get("home_phone", "") or "")
+    mobile_phone = normalize_phone(lead.get("mobile_phone", "") or "")
+    spouse_phone = normalize_phone(lead.get("spouse_phone", "") or "")
+
+    # If we have a dedicated mobile, that becomes primary
+    if mobile_phone:
+        primary_phone = mobile_phone
+
     payload: Dict[str, Any] = {
         "locationId": loc_id,
         "firstName": lead.get("first_name", ""),
         "lastName": lead.get("last_name", ""),
-        "phone": lead.get("phone", ""),
+        "phone": primary_phone,
     }
+
+    # Build additionalPhones for secondary numbers
+    additional_phones: List[Dict[str, str]] = []
+    if secondary_phone:
+        additional_phones.append({"type": "home", "phoneNumber": secondary_phone})
+    if home_phone and home_phone != primary_phone:
+        additional_phones.append({"type": "home", "phoneNumber": home_phone})
+    if spouse_phone:
+        additional_phones.append({"type": "other", "phoneNumber": spouse_phone})
+    if additional_phones:
+        payload["additionalPhones"] = additional_phones
 
     if lead.get("email"):
         payload["email"] = lead["email"]
@@ -129,7 +229,28 @@ async def upsert_contact(
     if lead.get("zip_code"):
         payload["postalCode"] = lead["zip_code"]
 
-    # Source / tags — upsert first, then merge tags to avoid replacing existing ones
+    # ── Timezone from state ──
+    state_raw = lead.get("state", "")
+    if state_raw:
+        state_key = state_raw.strip().upper()
+        tz = STATE_TIMEZONES.get(state_key)
+        if tz:
+            payload["timezone"] = tz
+
+    # ── Custom fields: lender, loan amount, spouse cell, home phone ──
+    custom_fields: List[Dict[str, Any]] = []
+    if lead.get("lender"):
+        custom_fields.append({"id": GHL_CF_LENDER, "field_value": lead["lender"]})
+    if lead.get("loan_amount"):
+        custom_fields.append({"id": GHL_CF_LOAN_AMOUNT, "field_value": str(lead["loan_amount"])})
+    if spouse_phone:
+        custom_fields.append({"id": GHL_CF_SPOUSE_CELL, "field_value": spouse_phone})
+    if home_phone:
+        custom_fields.append({"id": GHL_CF_HPHONE, "field_value": home_phone})
+    if custom_fields:
+        payload["customFields"] = custom_fields
+
+    # Source
     source = lead.get("lead_source") or lead.get("source") or "FC v3"
     payload["source"] = source
     # Do NOT include tags in the upsert payload — we merge them separately below
@@ -146,7 +267,7 @@ async def upsert_contact(
         contact_id = contact.get("id", "")
         logger.info("GHL upsert_contact → %s (new=%s)", contact_id, data.get("new", "?"))
 
-        # Merge tags — GET existing, union with new, PUT back
+        # ── Merge tags — import date tag only (no vendor/fc-v3 tags) ──
         if contact_id:
             try:
                 existing_resp = await client.get(
@@ -156,8 +277,18 @@ async def upsert_contact(
                 existing_resp.raise_for_status()
                 existing_contact = existing_resp.json().get("contact", {})
                 existing_tags: List[str] = existing_contact.get("tags", []) or []
-                new_tags = [source, "fc-v3"]
-                merged_tags = list(dict.fromkeys(existing_tags + new_tags))  # preserve order, dedupe
+
+                # Import date tag
+                import_tag = date.today().strftime("imported-%m/%d/%y")
+
+                # Remove old vendor/fc-v3 tags, keep pre-existing non-vendor tags
+                tags_to_remove = {"fc-v3", source.lower()}
+                cleaned_tags = [
+                    t for t in existing_tags
+                    if t.lower() not in tags_to_remove
+                    and not t.lower().startswith("imported-")
+                ]
+                merged_tags = list(dict.fromkeys(cleaned_tags + [import_tag]))
 
                 tag_resp = await client.put(
                     f"{GHL_BASE}/contacts/{contact_id}",
@@ -175,12 +306,13 @@ async def upsert_contact(
 async def create_opportunity(
     contact_id: str,
     stage_name: str = "New Lead",
-    pipeline_name: Optional[str] = None,
+    pipeline_name: Optional[str] = "MTG Leads",
     name: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Create a pipeline opportunity for a contact.
 
     Finds the correct pipeline/stage by name, then creates the opportunity.
+    Defaults to MTG Leads pipeline (Mortgage Protection).
     Returns the opportunity object from GHL.
     """
     settings = get_settings()

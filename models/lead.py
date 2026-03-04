@@ -11,7 +11,7 @@ class LeadPayload(BaseModel):
 
     first_name: str = Field(..., min_length=1, max_length=128)
     last_name: str = Field(..., min_length=1, max_length=128)
-    phone: str = Field(..., min_length=7, max_length=20)
+    phone: str = Field(..., min_length=7, max_length=40)
     email: Optional[str] = Field(None, max_length=256)
     address: Optional[str] = Field(None, max_length=512)
     city: Optional[str] = Field(None, max_length=128)
@@ -22,6 +22,11 @@ class LeadPayload(BaseModel):
     lead_source: Optional[str] = Field(None, max_length=64)
     source: Optional[str] = Field(None, max_length=64)  # alias — deprecated, use lead_source
     segment: Optional[str] = Field("Never Worked", max_length=64)
+    lender: Optional[str] = Field(None, max_length=128)
+    loan_amount: Optional[str] = Field(None, max_length=32)
+    home_phone: Optional[str] = Field(None, max_length=40)
+    mobile_phone: Optional[str] = Field(None, max_length=40)
+    spouse_phone: Optional[str] = Field(None, max_length=40)
     notes: Optional[str] = Field(None, max_length=2000)
 
 

@@ -13,6 +13,7 @@ from db.database import get_session
 from db.models import LeadXref, SyncLog
 from models.lead import LeadCaptureResponse, LeadPayload
 from services import ghl, notion
+from services.ghl import normalize_phone, split_phone_field
 from utils.age import calculate_age, calculate_lage
 
 logger = logging.getLogger("falconconnect.leads")
@@ -28,7 +29,7 @@ class BulkLeadItem(BaseModel):
 
     first_name: str = Field(..., min_length=1, max_length=128)
     last_name: str = Field(..., min_length=1, max_length=128)
-    phone: str = Field(..., min_length=7, max_length=20)
+    phone: str = Field(..., min_length=7, max_length=40)
     email: Optional[str] = Field(None, max_length=256)
     address: Optional[str] = Field(None, max_length=512)
     city: Optional[str] = Field(None, max_length=128)
@@ -40,6 +41,10 @@ class BulkLeadItem(BaseModel):
     lead_type: Optional[str] = Field(None, max_length=64)
     lead_age_bucket: Optional[str] = Field(None, max_length=32)
     lender: Optional[str] = Field(None, max_length=128)
+    loan_amount: Optional[str] = Field(None, max_length=32)
+    home_phone: Optional[str] = Field(None, max_length=40)
+    mobile_phone: Optional[str] = Field(None, max_length=40)
+    spouse_phone: Optional[str] = Field(None, max_length=40)
     notes: Optional[str] = Field(None, max_length=2000)
 
 
@@ -133,10 +138,13 @@ async def bulk_import_leads(
                 lage_months=lage_months,
             )
 
-            # Store cross-reference
+            # Store cross-reference (use normalized primary phone)
             try:
+                phones = split_phone_field(item.phone)
+                xref_phone = phones[0] if phones else normalize_phone(item.phone)
+
                 existing = await session.execute(
-                    select(LeadXref).where(LeadXref.phone == item.phone)
+                    select(LeadXref).where(LeadXref.phone == xref_phone)
                 )
                 xref = existing.scalar_one_or_none()
 
@@ -149,7 +157,7 @@ async def bulk_import_leads(
                     xref = LeadXref(
                         ghl_contact_id=ghl_contact_id,
                         notion_page_id=notion_page_id,
-                        phone=item.phone,
+                        phone=xref_phone,
                         first_name=item.first_name,
                         last_name=item.last_name,
                     )
@@ -158,7 +166,7 @@ async def bulk_import_leads(
                 sync_log = SyncLog(
                     event_type="lead.bulk_import",
                     direction="inbound",
-                    source_id=item.phone,
+                    source_id=xref_phone,
                     target_id=f"ghl:{ghl_contact_id}|notion:{notion_page_id}",
                     payload=json.dumps(lead_dict, default=str),
                     status="ok",
@@ -258,11 +266,13 @@ async def capture_lead(
             detail=f"Failed to push lead to Notion: {exc}",
         )
 
-    # --- Store cross-reference ---
+    # --- Store cross-reference (use normalized primary phone) ---
     try:
-        # Check if xref already exists for this phone
+        phones = split_phone_field(payload.phone)
+        xref_phone = phones[0] if phones else normalize_phone(payload.phone)
+
         existing = await session.execute(
-            select(LeadXref).where(LeadXref.phone == payload.phone)
+            select(LeadXref).where(LeadXref.phone == xref_phone)
         )
         xref = existing.scalar_one_or_none()
 
@@ -275,7 +285,7 @@ async def capture_lead(
             xref = LeadXref(
                 ghl_contact_id=ghl_contact_id,
                 notion_page_id=notion_page_id,
-                phone=payload.phone,
+                phone=xref_phone,
                 first_name=payload.first_name,
                 last_name=payload.last_name,
             )
@@ -285,7 +295,7 @@ async def capture_lead(
         sync_log = SyncLog(
             event_type="lead.captured",
             direction="inbound",
-            source_id=payload.phone,
+            source_id=xref_phone,
             target_id=f"ghl:{ghl_contact_id}|notion:{notion_page_id}",
             payload=json.dumps(lead_dict, default=str),
             status="ok",
