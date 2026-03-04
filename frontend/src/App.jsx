@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { ClerkProvider, SignIn, SignedIn, SignedOut, UserButton } from '@clerk/clerk-react'
+import { useState, useEffect } from 'react'
+import { ClerkProvider, SignedIn, SignedOut, UserButton, useSignIn } from '@clerk/clerk-react'
 import Dashboard from './components/Dashboard'
 import LeadImport from './components/LeadImport'
 import Licenses from './components/Licenses'
@@ -31,18 +31,129 @@ function PageContent({ currentPage }) {
   }
 }
 
+/* ── Custom Sign-In Form (no Clerk branding) ── */
+function CustomSignIn() {
+  const { isLoaded, signIn, setActive } = useSignIn()
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
+
+  async function handleSubmit(e) {
+    e.preventDefault()
+    if (!isLoaded) return
+
+    setError('')
+    setLoading(true)
+
+    try {
+      const result = await signIn.create({
+        identifier: email,
+        password,
+      })
+
+      if (result.status === 'complete') {
+        await setActive({ session: result.createdSessionId })
+      } else {
+        setError('Sign-in incomplete. Check your credentials.')
+      }
+    } catch (err) {
+      const msg =
+        err?.errors?.[0]?.longMessage ||
+        err?.errors?.[0]?.message ||
+        'Authentication failed.'
+      setError(msg)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  if (!isLoaded) {
+    return <p className="loading-text">Loading...</p>
+  }
+
+  return (
+    <form className="custom-signin-form" onSubmit={handleSubmit}>
+      <label className="form-label" htmlFor="signin-email">
+        Email
+      </label>
+      <input
+        id="signin-email"
+        className="custom-signin-input"
+        type="email"
+        autoComplete="email"
+        required
+        value={email}
+        onChange={(e) => setEmail(e.target.value)}
+        placeholder="agent@falconfinancial.org"
+        disabled={loading}
+      />
+
+      <label className="form-label" htmlFor="signin-password" style={{ marginTop: '0.75rem' }}>
+        Password
+      </label>
+      <input
+        id="signin-password"
+        className="custom-signin-input"
+        type="password"
+        autoComplete="current-password"
+        required
+        value={password}
+        onChange={(e) => setPassword(e.target.value)}
+        placeholder="••••••••"
+        disabled={loading}
+      />
+
+      <button
+        type="submit"
+        className="custom-signin-btn"
+        disabled={loading}
+      >
+        {loading ? 'AUTHENTICATING...' : 'SIGN IN'}
+      </button>
+
+      {error && <p className="custom-signin-error">{error}</p>}
+    </form>
+  )
+}
+
+/* ── App Layout with Collapsible Mobile Nav ── */
 function AppLayout() {
   const [currentPage, setCurrentPage] = useState('dashboard')
+  const [mobileNavOpen, setMobileNavOpen] = useState(false)
+
+  // Close mobile nav on page change
+  useEffect(() => {
+    setMobileNavOpen(false)
+  }, [currentPage])
+
+  const currentLabel = NAV_ITEMS.find((i) => i.key === currentPage)?.label || 'Dashboard'
 
   return (
     <div className="app-shell">
       <aside className="sidebar">
-        <div className="sidebar-header">
+        {/* Desktop sidebar header */}
+        <div className="sidebar-header desktop-only">
           <div className="sidebar-wordmark">
             FALCON<br />CONNECT
           </div>
         </div>
-        <nav className="sidebar-nav">
+
+        {/* Mobile nav header */}
+        <div
+          className="mobile-nav-header mobile-only"
+          onClick={() => setMobileNavOpen((o) => !o)}
+        >
+          <span className="mobile-nav-label">
+            {currentLabel}
+            <span className={`mobile-nav-chevron ${mobileNavOpen ? 'open' : ''}`}>
+              ›
+            </span>
+          </span>
+        </div>
+
+        {/* Desktop nav — always visible on desktop, hidden on mobile */}
+        <nav className="sidebar-nav desktop-only">
           {NAV_ITEMS.map((item) => (
             <button
               key={item.key}
@@ -54,6 +165,22 @@ function AppLayout() {
             </button>
           ))}
         </nav>
+
+        {/* Mobile dropdown nav */}
+        {mobileNavOpen && (
+          <nav className="mobile-nav-dropdown mobile-only">
+            {NAV_ITEMS.map((item) => (
+              <button
+                key={item.key}
+                className={`mobile-nav-item ${currentPage === item.key ? 'active' : ''}`}
+                onClick={() => setCurrentPage(item.key)}
+              >
+                {item.label}
+              </button>
+            ))}
+          </nav>
+        )}
+
         <div className="sidebar-footer">
           <UserButton
             appearance={{
@@ -96,7 +223,7 @@ function App() {
             <h1 className="auth-wordmark">FALCONCONNECT</h1>
             <hr className="auth-rule" />
             <p className="auth-subtitle">Internal System</p>
-            <SignIn />
+            <CustomSignIn />
           </div>
         </div>
       </SignedOut>

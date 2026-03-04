@@ -111,43 +111,77 @@ body {
   margin-bottom: 2.5rem;
 }
 
-/* Clerk SignIn overrides — target the container */
-.auth-card .cl-rootBox {
+/* ── Custom Sign-In Form ── */
+.custom-signin-form {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  text-align: left;
+}
+
+.custom-signin-input {
   width: 100%;
+  padding: 0.5rem 0.625rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: var(--text);
+  transition: border-color 0.15s;
+  margin-top: 0.25rem;
 }
 
-.auth-card .cl-card {
-  background: var(--surface) !important;
-  border: 1px solid var(--border) !important;
-  border-radius: 3px !important;
-  box-shadow: none !important;
+.custom-signin-input:focus {
+  outline: none;
+  border-color: var(--accent);
 }
 
-.auth-card .cl-headerTitle,
-.auth-card .cl-headerSubtitle {
-  font-family: var(--font-display) !important;
-  color: var(--text) !important;
+.custom-signin-input::placeholder {
+  color: var(--text-muted);
+  opacity: 0.6;
 }
 
-.auth-card .cl-formButtonPrimary {
-  background: var(--accent) !important;
-  border-radius: 2px !important;
-  font-family: var(--font-mono) !important;
+.custom-signin-input:disabled {
+  opacity: 0.5;
+}
+
+.custom-signin-btn {
+  width: 100%;
+  margin-top: 1.25rem;
+  padding: 0.5rem 1rem;
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 2px;
+  color: oklch(15% 0.01 85);
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
-  font-size: 0.8rem !important;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
 }
 
-.auth-card .cl-formFieldInput {
-  border-radius: 2px !important;
-  border-color: var(--border) !important;
-  background: var(--bg) !important;
-  color: var(--text) !important;
-  font-family: var(--font-mono) !important;
+.custom-signin-btn:hover:not(:disabled) {
+  background: var(--accent-dim);
+  border-color: var(--accent-dim);
 }
 
-.auth-card .cl-footerAction {
-  font-family: var(--font-mono) !important;
+.custom-signin-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.custom-signin-error {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--red);
+  margin-top: 0.75rem;
+  line-height: 1.4;
 }
 
 /* ══════════════════════════════════════════════
@@ -796,38 +830,110 @@ body {
 }
 
 /* ══════════════════════════════════════════════
+   MOBILE NAV — VISIBILITY HELPERS
+   ══════════════════════════════════════════════ */
+
+.mobile-only {
+  display: none;
+}
+
+/* ── Mobile Nav Header ── */
+.mobile-nav-header {
+  display: flex;
+  align-items: center;
+  padding: 0.875rem 1.25rem;
+  cursor: pointer;
+  user-select: none;
+  flex: 1;
+}
+
+.mobile-nav-label {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.mobile-nav-chevron {
+  display: inline-block;
+  font-size: 1rem;
+  line-height: 1;
+  transition: transform 0.2s ease;
+}
+
+.mobile-nav-chevron.open {
+  transform: rotate(90deg);
+}
+
+/* ── Mobile Dropdown ── */
+.mobile-nav-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+}
+
+.mobile-nav-item {
+  display: block;
+  width: 100%;
+  padding: 0.75rem 1.25rem;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  background: none;
+  border: none;
+  border-left: 3px solid transparent;
+  text-align: left;
+  cursor: pointer;
+  transition: color 0.1s, background 0.1s, border-color 0.1s;
+}
+
+.mobile-nav-item:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
+.mobile-nav-item.active {
+  color: var(--accent);
+  border-left-color: var(--accent);
+  background: oklch(14% 0.015 85 / 0.15);
+}
+
+/* ══════════════════════════════════════════════
    RESPONSIVE
    ══════════════════════════════════════════════ */
 
 @media (max-width: 768px) {
+  .desktop-only {
+    display: none !important;
+  }
+
+  .mobile-only {
+    display: flex;
+  }
+
+  .mobile-nav-dropdown {
+    display: flex;
+  }
+
   .sidebar {
     width: 100%;
     position: relative;
     flex-direction: row;
+    flex-wrap: wrap;
     min-height: auto;
     border-right: none;
     border-bottom: 1px solid var(--border);
-  }
-
-  .sidebar-header {
-    padding: 1rem 1.25rem;
-    border-bottom: none;
-    border-right: 1px solid var(--border-subtle);
-  }
-
-  .sidebar-nav {
-    display: flex;
-    align-items: center;
-    padding: 0;
-  }
-
-  .nav-item {
-    padding: 1rem;
-  }
-
-  .nav-item.active {
-    border-right: none;
-    border-bottom: 2px solid var(--accent);
   }
 
   .sidebar-footer {
@@ -836,6 +942,7 @@ body {
     border-left: 1px solid var(--border-subtle);
     display: flex;
     align-items: center;
+    padding: 0.875rem 1.25rem;
   }
 
   .app-shell {

@@ -17,6 +17,8 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=_resolve_env_files(),
         env_file_encoding="utf-8",
+        # Always read from real environment — env vars override .env file
+        env_ignore_empty=False,
     )
 
     # --- GHL ---
