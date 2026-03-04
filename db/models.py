@@ -3,6 +3,7 @@
 from datetime import datetime, date
 
 from sqlalchemy import (
+    Boolean,
     Column,
     DateTime,
     Date,
@@ -81,6 +82,32 @@ class AnalyticsDaily(Base):
     premium_submitted: float = Column(Float, default=0.0)
     premium_issued: float = Column(Float, default=0.0)
     notes: str = Column(Text, nullable=True)
+    created_at: datetime = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at: datetime = Column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class DBLicense(Base):
+    """Agent license records — used by FalconVerify consumer portal.
+
+    Stores state licenses with auto-generated verification URLs
+    (NAIC SOLAR deep-links, FL DFS permalinks, or state portal URLs).
+    """
+
+    __tablename__ = "licenses"
+
+    id: int = Column(Integer, primary_key=True, autoincrement=True)
+    user_id: str = Column(String(128), nullable=False, index=True)  # Clerk user ID
+    state: str = Column(String(64), nullable=False)
+    state_abbreviation: str = Column(String(2), nullable=False, index=True)
+    license_number: str = Column(String(64), nullable=True)
+    verify_url: str = Column(String(512), nullable=True)
+    needs_manual_verification: bool = Column(Boolean, default=False)
+    status: str = Column(String(16), default="active", index=True)
+    license_type: str = Column(String(64), default="insurance_producer")
+    issue_date: date = Column(Date, nullable=True)
+    expiry_date: date = Column(Date, nullable=True, index=True)
     created_at: datetime = Column(DateTime(timezone=True), server_default=func.now())
     updated_at: datetime = Column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
