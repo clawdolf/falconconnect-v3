@@ -10,7 +10,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from db.database import init_db
-from routers import leads, webhooks, calendar, analytics, admin, sync, licenses
+from routers import leads, webhooks, calendar, analytics, admin, sync, licenses, agents
 from services.notion_ghl_sync import sync_loop
 
 logging.basicConfig(
@@ -182,6 +182,7 @@ app.include_router(analytics.router, prefix="/api/analytics", tags=["Analytics"]
 app.include_router(admin.router, prefix="/api/admin", tags=["Admin"])
 app.include_router(sync.router, prefix="/api/sync", tags=["Sync"])
 app.include_router(licenses.router, prefix="/api/licenses", tags=["Licenses"])
+app.include_router(agents.router, prefix="/api/public", tags=["Agents"])
 
 # Serve React frontend (built files) — must be LAST so API routes take priority
 frontend_dist = os.path.join(os.path.dirname(__file__), "frontend", "dist")
