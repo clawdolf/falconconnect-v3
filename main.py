@@ -68,6 +68,18 @@ async def root_health():
     }
 
 
+@app.get("/debug/env")
+async def debug_env():
+    """Temporary debug endpoint — checks raw env vars. Remove after verifying Clerk."""
+    import os
+    return {
+        "CLERK_SECRET_KEY_set": bool(os.environ.get("CLERK_SECRET_KEY", "")),
+        "CLERK_PUBLISHABLE_KEY_set": bool(os.environ.get("CLERK_PUBLISHABLE_KEY", "")),
+        "CLERK_SECRET_KEY_len": len(os.environ.get("CLERK_SECRET_KEY", "")),
+        "GHL_API_KEY_set": bool(os.environ.get("GHL_API_KEY", "")),
+    }
+
+
 # API routers
 app.include_router(leads.router, prefix="/api/public", tags=["Leads"])
 app.include_router(webhooks.router, prefix="/api/webhooks", tags=["Webhooks"])
