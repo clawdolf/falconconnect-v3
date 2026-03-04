@@ -26,7 +26,7 @@ async def _seed_licenses_if_empty() -> None:
     """Seed Seb's 8 licenses from v2 prod DB if table is empty. Idempotent."""
     from sqlalchemy import text
 
-    SEB_USER_ID = "72dc5b7c-ba2c-4a1d-83b9-733ff600c0d5"
+    SEB_USER_ID = "user_3ASljZWeTNVAOMGP62n87Eq0GG9"
     LICENSES = [
         ("Arizona",        "AZ", None,      "https://sbs.naic.org/solar-external-lookup/lookup/licensee/summary/21408357?jurisdiction=AZ&entityType=IND&licenseType=PRO", False),
         ("Florida",        "FL", "G258860", "https://licenseesearch.fldfs.com/Licensee/2700806", False),
@@ -127,7 +127,7 @@ async def seed_licenses_now():
     from sqlalchemy import text
     from db.database import _get_session_factory as _sf
 
-    SEB_UID = "72dc5b7c-ba2c-4a1d-83b9-733ff600c0d5"
+    SEB_UID = "user_3ASljZWeTNVAOMGP62n87Eq0GG9"
     LICENSES = [
         ("Arizona",        "AZ", None,      "https://sbs.naic.org/solar-external-lookup/lookup/licensee/summary/21408357?jurisdiction=AZ&entityType=IND&licenseType=PRO", False),
         ("Florida",        "FL", "G258860", "https://licenseesearch.fldfs.com/Licensee/2700806", False),

@@ -1,21 +1,20 @@
 """Clerk authentication middleware for FastAPI.
 
-Verifies Clerk session JWTs using the Clerk Backend API.
-Falls through gracefully if CLERK_SECRET_KEY is not configured (returns a
-placeholder user so the app still runs during development before Clerk keys
-are provided).
+Verifies Clerk session JWTs using JWKS (RS256). The `sub` claim is the
+Clerk user ID (e.g. user_3ASljZWeTNVAOMGP62n87Eq0GG9).
 
 Usage:
     from middleware.auth import require_auth
     @router.get("/protected")
     async def protected(user=Depends(require_auth)):
-        ...
+        user_id = user["sub"]  # Clerk user ID
 """
 
 import logging
 from typing import Any, Dict, Optional
 
 import httpx
+import jwt as pyjwt
 from fastapi import HTTPException, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
@@ -23,59 +22,30 @@ from config import get_settings
 
 logger = logging.getLogger("falconconnect.auth.clerk")
 
-# HTTPBearer with auto_error=False so we can give a better error message
 security = HTTPBearer(auto_error=False)
 
-# Clerk JWKS endpoint for JWT verification
+# Clerk JWKS endpoint — no auth needed to fetch public keys
 CLERK_JWKS_URL = "https://api.clerk.com/v1/jwks"
+
+# Simple in-process JWKS cache (keys rarely rotate)
+_jwks_cache: Optional[Dict] = None
+
+
+async def _get_jwks() -> Dict:
+    global _jwks_cache
+    if _jwks_cache:
+        return _jwks_cache
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.get(CLERK_JWKS_URL)
+        resp.raise_for_status()
+        _jwks_cache = resp.json()
+    return _jwks_cache
 
 
 async def _verify_clerk_token(token: str) -> Dict[str, Any]:
-    """Verify a Clerk session token via the Clerk Backend API.
-
-    Uses the /sessions endpoint to verify the token. Returns user info
-    on success, raises HTTPException on failure.
-    """
-    settings = get_settings()
-
-    # Try to verify via Clerk's verify endpoint
-    async with httpx.AsyncClient(timeout=10) as client:
-        # Use the Clerk Backend API to verify the session token
-        # The token from the frontend is a JWT — we verify it by calling
-        # Clerk's /clients/verify endpoint or by decoding the JWT ourselves.
-        # For simplicity and security, we use the Backend API.
-        resp = await client.post(
-            "https://api.clerk.com/v1/tokens/verify",
-            headers={
-                "Authorization": f"Bearer {settings.clerk_secret_key}",
-                "Content-Type": "application/json",
-            },
-            json={"token": token},
-        )
-
-        if resp.status_code == 200:
-            return resp.json()
-
-        # Fallback: try the session-based approach
-        # Clerk frontend sends session tokens as JWTs
-        # We can also try to get the user from the token claims
-        logger.warning("Clerk token verify returned %d, trying JWKS fallback", resp.status_code)
-
-    # If Clerk verify fails, try JWKS-based JWT validation
+    """Verify a Clerk session JWT using JWKS. Returns decoded claims."""
     try:
-        import jwt as pyjwt
-
-        # Fetch JWKS
-        async with httpx.AsyncClient(timeout=10) as client:
-            jwks_resp = await client.get(
-                CLERK_JWKS_URL,
-                headers={"Authorization": f"Bearer {settings.clerk_secret_key}"},
-            )
-            jwks_resp.raise_for_status()
-            jwks = jwks_resp.json()
-
-        # Decode the JWT
-        # Get the signing key from JWKS
+        jwks = await _get_jwks()
         header = pyjwt.get_unverified_header(token)
         kid = header.get("kid")
 
@@ -86,9 +56,19 @@ async def _verify_clerk_token(token: str) -> Dict[str, Any]:
                 break
 
         if not signing_key:
+            # JWKS may have rotated — bust cache and retry once
+            global _jwks_cache
+            _jwks_cache = None
+            jwks = await _get_jwks()
+            for key in jwks.get("keys", []):
+                if key.get("kid") == kid:
+                    signing_key = pyjwt.algorithms.RSAAlgorithm.from_jwk(key)
+                    break
+
+        if not signing_key:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Unable to find signing key for token",
+                detail="Token signing key not found — session may have expired.",
             )
 
         claims = pyjwt.decode(
@@ -99,17 +79,24 @@ async def _verify_clerk_token(token: str) -> Dict[str, Any]:
         )
         return claims
 
-    except ImportError:
-        logger.warning("PyJWT not installed — cannot do JWKS-based verification")
+    except pyjwt.ExpiredSignatureError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token verification failed",
+            detail="Session token expired. Please sign in again.",
         )
-    except Exception as e:
-        logger.error("JWT verification failed: %s", e)
+    except pyjwt.InvalidTokenError as e:
+        logger.warning("Invalid Clerk token: %s", e)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired token",
+            detail="Invalid session token.",
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Auth error: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication failed.",
         )
 
 
@@ -118,33 +105,24 @@ async def require_auth(
 ) -> Dict[str, Any]:
     """FastAPI dependency — require a valid Clerk session token.
 
-    If CLERK_SECRET_KEY is empty (not yet configured), returns a placeholder
-    user dict so the app can run in development mode. Logs a warning.
+    Returns decoded JWT claims. Use `user["sub"]` for the Clerk user ID.
 
-    In production with a real key, verifies the Bearer token against Clerk.
+    If CLERK_SECRET_KEY is not set (dev mode), bypasses auth entirely.
     """
     settings = get_settings()
 
-    # If Clerk is not configured yet, allow access with a warning
     if not settings.clerk_secret_key:
-        logger.warning(
-            "CLERK_SECRET_KEY not configured — auth is DISABLED. "
-            "Set CLERK_SECRET_KEY to enable authentication."
-        )
+        logger.warning("CLERK_SECRET_KEY not set — auth DISABLED (dev mode).")
         return {
-            "user_id": "dev-mode",
-            "email": "dev@falconconnect.local",
+            "sub": "user_3ASljZWeTNVAOMGP62n87Eq0GG9",  # Seb's Clerk ID
             "auth_mode": "disabled",
         }
 
-    # Require a Bearer token
     if not credentials:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing Authorization header. Use Bearer <clerk_session_token>.",
+            detail="Missing Authorization header.",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    token = credentials.credentials
-    user_data = await _verify_clerk_token(token)
-    return user_data
+    return await _verify_clerk_token(credentials.credentials)

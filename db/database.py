@@ -66,6 +66,21 @@ async def init_db() -> None:
         await conn.run_sync(Base.metadata.create_all)
     logger.info("Database tables verified / created.")
 
+    # One-time migration: update old internal UUID → real Clerk user ID on licenses + agents
+    CLERK_ID = "user_3ASljZWeTNVAOMGP62n87Eq0GG9"
+    OLD_UUID = "72dc5b7c-ba2c-4a1d-83b9-733ff600c0d5"
+    from sqlalchemy import text as _text
+    async with _get_session_factory()() as session:
+        await session.execute(
+            _text("UPDATE licenses SET user_id = :new WHERE user_id = :old"),
+            {"new": CLERK_ID, "old": OLD_UUID},
+        )
+        await session.execute(
+            _text("UPDATE agents SET user_id = :new WHERE user_id = :old"),
+            {"new": CLERK_ID, "old": OLD_UUID},
+        )
+        await session.commit()
+
     # Seed Seb's agent record if not present
     async with _get_session_factory()() as session:
         result = await session.execute(
@@ -80,7 +95,7 @@ async def init_db() -> None:
                 "Nationwide", "Securian Financial",
             ])
             seb = DBAgent(
-                user_id="72dc5b7c-ba2c-4a1d-83b9-733ff600c0d5",
+                user_id="user_3ASljZWeTNVAOMGP62n87Eq0GG9",
                 slug="seb",
                 name="Sébastien Taillieu",
                 title="Founder & Principal Advisor",
