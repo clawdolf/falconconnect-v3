@@ -185,13 +185,18 @@ async def bulk_import_leads(
                     )
 
                 # Update Notion with GHL contact ID (cross-reference)
+                # Bug 7 fix: Read existing comments first, then merge
                 if ghl_contact_id:
                     try:
+                        existing_comments = await notion._read_aggregate_comments(notion_page_id)
+                        new_comments = _build_aggregate_comments(
+                            ghl_contact_id, item.notes, existing_comments
+                        )
                         await notion.update_page(notion_page_id, {
                             "Aggregate Comments": {
                                 "rich_text": [{
                                     "text": {
-                                        "content": _build_aggregate_comments(ghl_contact_id, item.notes)
+                                        "content": new_comments
                                     }
                                 }]
                             }
@@ -244,16 +249,44 @@ async def bulk_import_leads(
     )
 
 
-def _build_aggregate_comments(ghl_id: str, notes: Optional[str]) -> str:
-    """BUG 4 FIX: Always write GHL ID first, append notes after.
+def _build_aggregate_comments(
+    ghl_id: str,
+    notes: Optional[str],
+    existing_comments: str = "",
+) -> str:
+    """Bug 7 fix: Merge GHL ID and notes with existing Aggregate Comments.
 
     Format: GHL:{id} | {notes}
-    Never overwrite the GHL ID portion.
+    Never overwrite existing non-empty content with blank.
+    Preserves existing comments and appends new info.
     """
-    base = f"GHL:{ghl_id}" if ghl_id else ""
-    if notes:
-        return f"{base} | {notes}"[:2000]
-    return base
+    new_base = f"GHL:{ghl_id}" if ghl_id else ""
+
+    if existing_comments:
+        # If GHL ID already in existing, preserve everything
+        if ghl_id and f"GHL:{ghl_id}" in existing_comments:
+            if notes and notes not in existing_comments:
+                return f"{existing_comments} | {notes}"[:2000]
+            return existing_comments
+        # If a different GHL ID exists, update it
+        elif "GHL:" in existing_comments and ghl_id:
+            import re
+            updated = re.sub(r"GHL:[^\s|]+", f"GHL:{ghl_id}", existing_comments, count=1)
+            if notes and notes not in updated:
+                return f"{updated} | {notes}"[:2000]
+            return updated
+        # No GHL ID yet — prepend
+        elif ghl_id:
+            result = f"GHL:{ghl_id} | {existing_comments}"
+            if notes and notes not in result:
+                result = f"{result} | {notes}"
+            return result[:2000]
+        else:
+            return existing_comments
+    else:
+        if notes:
+            return f"{new_base} | {notes}"[:2000]
+        return new_base
 
 
 # ── Single lead capture (kept for backwards compatibility) ──
@@ -322,15 +355,17 @@ async def capture_lead(
         except Exception as exc:
             logger.warning("GHL create_opportunity failed (non-fatal): %s", exc)
 
-        # Update Notion with GHL ID
+        # Update Notion with GHL ID (Bug 7: read-then-merge)
         if ghl_contact_id:
             try:
                 notes = lead_dict.get("notes", "")
+                existing_comments = await notion._read_aggregate_comments(notion_page_id)
+                new_comments = _build_aggregate_comments(ghl_contact_id, notes, existing_comments)
                 await notion.update_page(notion_page_id, {
                     "Aggregate Comments": {
                         "rich_text": [{
                             "text": {
-                                "content": _build_aggregate_comments(ghl_contact_id, notes)
+                                "content": new_comments
                             }
                         }]
                     }
