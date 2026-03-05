@@ -8,6 +8,9 @@ Features:
   - SYNC_AFTER_DATE filter: only syncs appointments on or after this date
   - 6-minute overlap buffer for the poll window (catches edits between cycles)
   - Manual dry-run endpoint returns 30-day lookahead
+  - Bug 2 fix: DB audit trail via sync_log writes
+  - Bug 4 fix: Cancellation propagation (detects removed Appointment Dates)
+  - Bug 6 fix: Notion API rate limiting (334ms between operations)
 
 Configuration (env vars):
   NOTION_GHL_SYNC_ENABLED=true       # Master on/off switch
@@ -17,14 +20,45 @@ Configuration (env vars):
 """
 
 import asyncio
+import json
 import logging
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from config import get_settings
 from services import ghl, notion
 
 logger = logging.getLogger("falconconnect.sync.notion_ghl")
+
+
+async def _write_sync_log(
+    event_type: str,
+    direction: str = "notion_to_ghl",
+    source_id: str = "",
+    target_id: str = "",
+    payload: Optional[Dict] = None,
+    status: str = "ok",
+    error_detail: Optional[str] = None,
+) -> None:
+    """Bug 2 fix: Write a row to sync_log for every background sync operation."""
+    try:
+        from db.database import _get_session_factory
+        from db.models import SyncLog
+
+        async with _get_session_factory()() as session:
+            log = SyncLog(
+                event_type=event_type,
+                direction=direction,
+                source_id=source_id or "",
+                target_id=target_id or "",
+                payload=json.dumps(payload, default=str) if payload else None,
+                status=status,
+                error_detail=error_detail,
+            )
+            session.add(log)
+            await session.commit()
+    except Exception as e:
+        logger.warning("Failed to write sync_log: %s", e)
 
 
 def _extract_phone(props: Dict[str, Any]) -> str:

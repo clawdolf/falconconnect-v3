@@ -59,6 +59,28 @@ async def _seed_licenses_if_empty() -> None:
         logger.warning("License seed failed (non-fatal): %s", exc)
 
 
+async def _dedup_licenses() -> None:
+    """Remove duplicate license rows (same user_id + state_abbreviation). Keeps newest."""
+    from sqlalchemy import text
+    try:
+        from db.database import _get_session_factory as _sf
+        async with _sf()() as session:
+            result = await session.execute(text(
+                "DELETE FROM licenses WHERE id IN ("
+                "  SELECT id FROM ("
+                "    SELECT id, ROW_NUMBER() OVER (PARTITION BY user_id, state_abbreviation ORDER BY id DESC) AS rn"
+                "    FROM licenses"
+                "  ) ranked WHERE rn > 1"
+                ")"
+            ))
+            deleted = result.rowcount
+            if deleted:
+                await session.commit()
+                logger.info("Dedup: removed %d duplicate license rows", deleted)
+    except Exception as exc:
+        logger.warning("License dedup failed (non-fatal): %s", exc)
+
+
 async def lifespan(app: FastAPI):
     """Startup / shutdown lifecycle."""
     logger.info("FalconConnect v3 starting up …")
@@ -67,8 +89,9 @@ async def lifespan(app: FastAPI):
     # Alembic migrations ran at build time; this is a fast safety net only.
     await init_db()
 
-    # Seed Seb's licenses if empty (idempotent)
+    # Seed Seb's licenses if empty (idempotent), then dedup any duplicates
     await _seed_licenses_if_empty()
+    await _dedup_licenses()
 
     # Start background Notion → GHL sync loop
     sync_task = asyncio.create_task(sync_loop())
