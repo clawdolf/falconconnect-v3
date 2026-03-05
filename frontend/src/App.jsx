@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { ClerkProvider, SignedIn, SignedOut, useSignIn, useUser, useClerk } from '@clerk/clerk-react'
+import { ClerkProvider, SignedIn, SignedOut, useSignIn, useUser, useClerk, AuthenticateWithRedirectCallback } from '@clerk/clerk-react'
 import Dashboard from './components/Dashboard'
 import LeadImport from './components/LeadImport'
 import Licenses from './components/Licenses'
@@ -45,6 +45,23 @@ function CustomSignIn() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [step, setStep] = useState('password') // 'password' | 'otp'
+
+  async function handleAppleSignIn() {
+    if (!isLoaded) return
+    setError('')
+    setLoading(true)
+    try {
+      await signIn.authenticateWithRedirect({
+        strategy: 'oauth_apple',
+        redirectUrl: '/sso-callback',
+        redirectUrlComplete: '/',
+      })
+    } catch (err) {
+      const msg = err?.errors?.[0]?.longMessage || err?.errors?.[0]?.message || 'Apple sign-in failed.'
+      setError(msg)
+      setLoading(false)
+    }
+  }
 
   async function handlePasswordSubmit(e) {
     e.preventDefault()
@@ -215,6 +232,40 @@ function CustomSignIn() {
         {loading ? 'AUTHENTICATING...' : 'SIGN IN'}
       </button>
 
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', margin: '0.75rem 0' }}>
+        <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+        <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.6rem', color: 'var(--text-muted)', letterSpacing: '0.05em' }}>OR</span>
+        <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+      </div>
+
+      <button
+        type="button"
+        onClick={handleAppleSignIn}
+        disabled={loading}
+        style={{
+          width: '100%',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: '0.5rem',
+          background: '#000',
+          color: '#fff',
+          border: '1px solid var(--border)',
+          borderRadius: 4,
+          padding: '0.6rem 1rem',
+          fontFamily: 'var(--font-mono)',
+          fontSize: '0.72rem',
+          letterSpacing: '0.05em',
+          cursor: 'pointer',
+          touchAction: 'manipulation',
+        }}
+      >
+        <svg width="16" height="16" viewBox="0 0 814 1000" fill="white" xmlns="http://www.w3.org/2000/svg">
+          <path d="M788.1 340.9c-5.8 4.5-108.2 62.2-108.2 190.5 0 148.4 130.3 200.9 134.2 202.2-.6 3.2-20.7 71.9-68.7 141.9-42.8 61.6-87.5 123.1-155.5 123.1s-85.5-39.5-164-39.5c-76 0-103.7 40.8-165.9 40.8s-105-57.8-155.5-127.4C46 411.6 8.1 251.9 8.1 99.5c0-89.9 30.8-182.6 87.7-247.2C150.3-201.4 225.4-240 306.6-240c81.2 0 132.7 53.8 196.7 53.8 61.9 0 99.9-53.8 189.8-53.8 72.3 0 141 32.5 194.4 88.3zm-234-181.4c31.1-36.9 53.1-88.1 53.1-139.3 0-7.1-.6-14.3-1.9-20.1-50.6 1.9-110.8 33.7-147.1 75.8-28.5 32.4-55.1 83.6-55.1 135.5 0 7.8 1.3 15.6 1.9 18.1 3.2.6 8.4 1.3 13.6 1.3 45.4 0 102.5-30.4 135.5-71.3z"/>
+        </svg>
+        SIGN IN WITH APPLE
+      </button>
+
       {error && <p className="custom-signin-error">{error}</p>}
     </form>
   )
@@ -226,6 +277,19 @@ function UserMenu() {
   const { signOut } = useClerk()
   const [open, setOpen] = useState(false)
   const menuRef = useRef(null)
+
+  const hasApple = user?.externalAccounts?.some(a => a.provider === 'apple')
+
+  async function connectApple() {
+    try {
+      await user.createExternalAccount({
+        strategy: 'oauth_apple',
+        redirectUrl: '/sso-callback',
+      })
+    } catch (err) {
+      console.error('Apple connect failed', err)
+    }
+  }
 
   // Close on outside click
   useEffect(() => {
@@ -308,6 +372,43 @@ function UserMenu() {
               </p>
             )}
           </div>
+
+          <hr style={{ border: 'none', borderTop: '1px solid var(--border)', margin: '0.5rem 0' }} />
+
+          {/* Connect Apple (if not yet linked) */}
+          {!hasApple && (
+            <button
+              onClick={connectApple}
+              style={{
+                width: '100%',
+                textAlign: 'left',
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                fontFamily: 'var(--font-mono)',
+                fontSize: '0.72rem',
+                color: 'var(--text-muted)',
+                padding: '0.25rem 0',
+                letterSpacing: '0.05em',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.4rem',
+                touchAction: 'manipulation',
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text)' }}
+              onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-muted)' }}
+            >
+              <svg width="12" height="12" viewBox="0 0 814 1000" fill="currentColor"><path d="M788.1 340.9c-5.8 4.5-108.2 62.2-108.2 190.5 0 148.4 130.3 200.9 134.2 202.2-.6 3.2-20.7 71.9-68.7 141.9-42.8 61.6-87.5 123.1-155.5 123.1s-85.5-39.5-164-39.5c-76 0-103.7 40.8-165.9 40.8s-105-57.8-155.5-127.4C46 411.6 8.1 251.9 8.1 99.5c0-89.9 30.8-182.6 87.7-247.2C150.3-201.4 225.4-240 306.6-240c81.2 0 132.7 53.8 196.7 53.8 61.9 0 99.9-53.8 189.8-53.8 72.3 0 141 32.5 194.4 88.3zm-234-181.4c31.1-36.9 53.1-88.1 53.1-139.3 0-7.1-.6-14.3-1.9-20.1-50.6 1.9-110.8 33.7-147.1 75.8-28.5 32.4-55.1 83.6-55.1 135.5 0 7.8 1.3 15.6 1.9 18.1 3.2.6 8.4 1.3 13.6 1.3 45.4 0 102.5-30.4 135.5-71.3z"/></svg>
+              Connect Apple ID
+            </button>
+          )}
+
+          {hasApple && (
+            <p style={{ fontFamily: 'var(--font-mono)', fontSize: '0.62rem', color: 'var(--text-muted)', margin: '0 0 0.25rem', padding: '0.25rem 0', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+              <svg width="12" height="12" viewBox="0 0 814 1000" fill="currentColor"><path d="M788.1 340.9c-5.8 4.5-108.2 62.2-108.2 190.5 0 148.4 130.3 200.9 134.2 202.2-.6 3.2-20.7 71.9-68.7 141.9-42.8 61.6-87.5 123.1-155.5 123.1s-85.5-39.5-164-39.5c-76 0-103.7 40.8-165.9 40.8s-105-57.8-155.5-127.4C46 411.6 8.1 251.9 8.1 99.5c0-89.9 30.8-182.6 87.7-247.2C150.3-201.4 225.4-240 306.6-240c81.2 0 132.7 53.8 196.7 53.8 61.9 0 99.9-53.8 189.8-53.8 72.3 0 141 32.5 194.4 88.3zm-234-181.4c31.1-36.9 53.1-88.1 53.1-139.3 0-7.1-.6-14.3-1.9-20.1-50.6 1.9-110.8 33.7-147.1 75.8-28.5 32.4-55.1 83.6-55.1 135.5 0 7.8 1.3 15.6 1.9 18.1 3.2.6 8.4 1.3 13.6 1.3 45.4 0 102.5-30.4 135.5-71.3z"/></svg>
+              Apple ID linked
+            </p>
+          )}
 
           <hr style={{ border: 'none', borderTop: '1px solid var(--border)', margin: '0.5rem 0' }} />
 
@@ -407,6 +508,15 @@ function App() {
   // Dev bypass or no Clerk key — skip auth entirely
   if (DEV_BYPASS || !PUBLISHABLE_KEY) {
     return <AppLayout />
+  }
+
+  // Handle SSO callback (Apple/Google redirect)
+  if (window.location.pathname === '/sso-callback') {
+    return (
+      <ClerkProvider publishableKey={PUBLISHABLE_KEY}>
+        <AuthenticateWithRedirectCallback />
+      </ClerkProvider>
+    )
   }
 
   return (
