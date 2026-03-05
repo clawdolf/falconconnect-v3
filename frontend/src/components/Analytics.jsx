@@ -87,18 +87,49 @@ function Analytics() {
     setSheetError(null)
 
     try {
-      const headers = await getHeaders()
-      const resp = await fetch(`/api/public/sheets/data?sheet_id=${encodeURIComponent(id)}`, { headers })
-
-      if (resp.status === 404 || resp.status === 501) {
-        // Backend doesn't have sheets endpoint yet - try parsing from localStorage mock
-        setSheetError('Google Sheets API not configured on backend. Connect in a future update.')
-        setSheetLoading(false)
-        return
+      // Try to get a Google OAuth token from Clerk (only available if signed in with Google)
+      let googleToken = null
+      if (getToken) {
+        try {
+          googleToken = await getToken({ template: 'google' })
+        } catch {
+          // Not signed in with Google — no token available, fall through to public access
+        }
       }
-      if (!resp.ok) throw new Error('Could not fetch sheet data')
 
-      const data = await resp.json()
+      let data
+      if (googleToken) {
+        // Signed in with Google — use private sheets endpoint with both tokens
+        const clerkToken = await getToken()
+        const resp = await fetch(`/api/sheets/data?sheet_id=${encodeURIComponent(id)}`, {
+          headers: {
+            'Authorization': `Bearer ${clerkToken}`,
+            'X-Google-Token': googleToken,
+          },
+        })
+
+        if (resp.status === 403) {
+          const body = await resp.json().catch(() => ({}))
+          setSheetError(body.detail || 'Sheet is not accessible with your Google account. Check permissions or make it public.')
+          setSheetLoading(false)
+          return
+        }
+        if (!resp.ok) throw new Error(`Could not fetch sheet data (HTTP ${resp.status})`)
+        data = await resp.json()
+      } else {
+        // Fallback — public endpoint
+        setSheetError('Connect with Google to access private sheets. Currently using public access only.')
+        const headers = await getHeaders()
+        const resp = await fetch(`/api/public/sheets/data?sheet_id=${encodeURIComponent(id)}`, { headers })
+
+        if (resp.status === 404 || resp.status === 501) {
+          setSheetLoading(false)
+          return
+        }
+        if (!resp.ok) throw new Error('Could not fetch sheet data')
+        data = await resp.json()
+      }
+
       const parsed = parseAccountabilityData(data.headers || [], data.rows || [])
       setSheetData(parsed)
       const now = new Date().toISOString()
@@ -373,6 +404,9 @@ function Analytics() {
               {sheetLoading ? 'Fetching...' : 'Fetch Latest Data'}
             </button>
           </div>
+          <p className="form-hint" style={{ margin: '0.75rem 0 0', fontSize: '0.65rem', color: 'var(--text-muted)' }}>
+            Private sheet access requires signing in with Google.
+          </p>
           {sheetError && <div className="alert alert-error" style={{ fontSize: '0.75rem' }}>{sheetError}</div>}
         </section>
       )}

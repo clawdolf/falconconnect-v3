@@ -5,13 +5,13 @@ import logging
 import os
 from datetime import datetime, timezone
 
-from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from db.database import init_db
 from routers import leads, webhooks, calendar, analytics, admin, sync, licenses, agents
+from routers.sheets import router as sheets_router
 from services.notion_ghl_sync import sync_loop
 
 logging.basicConfig(
@@ -21,9 +21,8 @@ logging.basicConfig(
 logger = logging.getLogger("falconconnect")
 
 
-@asynccontextmanager
 async def _seed_licenses_if_empty() -> None:
-    """Seed Seb's 8 licenses from v2 prod DB if table is empty. Idempotent."""
+    """Seed Seb's 8 licenses if table is empty for his Clerk user ID. Idempotent."""
     from sqlalchemy import text
 
     SEB_USER_ID = os.environ.get("CLERK_ADMIN_USER_ID", "user_3ASrwDOrSTaDxCus6f1B5lnDsgz")
@@ -67,6 +66,9 @@ async def lifespan(app: FastAPI):
     # init_db() runs create_all (idempotent — creates missing tables, skips existing)
     # Alembic migrations ran at build time; this is a fast safety net only.
     await init_db()
+
+    # Seed Seb's licenses if empty (idempotent)
+    await _seed_licenses_if_empty()
 
     # Start background Notion → GHL sync loop
     sync_task = asyncio.create_task(sync_loop())
@@ -198,6 +200,7 @@ app.include_router(admin.router, prefix="/api/admin", tags=["Admin"])
 app.include_router(sync.router, prefix="/api/sync", tags=["Sync"])
 app.include_router(licenses.router, prefix="/api/licenses", tags=["Licenses"])
 app.include_router(agents.router, prefix="/api/public", tags=["Agents"])
+app.include_router(sheets_router, prefix="/api/sheets", tags=["Sheets"])
 
 # Serve React frontend (built files) — must be LAST so API routes take priority
 frontend_dist = os.path.join(os.path.dirname(__file__), "frontend", "dist")

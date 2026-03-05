@@ -112,9 +112,12 @@ async def require_auth(
     settings = get_settings()
 
     if not settings.clerk_secret_key:
-        logger.warning("CLERK_SECRET_KEY not set — auth DISABLED (dev mode).")
+        import os
+        dev_user_id = os.environ.get("CLERK_ADMIN_USER_ID", "user_3ASrwDOrSTaDxCus6f1B5lnDsgz")
+        logger.warning("CLERK_SECRET_KEY not set — auth DISABLED (dev mode, user_id=%s).", dev_user_id)
         return {
-            "sub": "user_3ASljZWeTNVAOMGP62n87Eq0GG9",  # Seb's Clerk ID
+            "sub": dev_user_id,
+            "user_id": dev_user_id,
             "auth_mode": "disabled",
         }
 

@@ -152,8 +152,6 @@ class DBLicense(Base):
     needs_manual_verification: bool = Column(Boolean, default=False)
     status: str = Column(String(16), default="active", index=True)
     license_type: str = Column(String(64), default="insurance_producer")
-    issue_date: date = Column(Date, nullable=True)
-    expiry_date: date = Column(Date, nullable=True, index=True)
     created_at: datetime = Column(DateTime(timezone=True), server_default=func.now())
     updated_at: datetime = Column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

@@ -1,17 +1,21 @@
-"""Lead capture endpoint — dual push to GHL + Notion."""
+"""Lead capture & bulk import — Notion first (source of truth), then GHL (automations).
 
+Business logic (locked decisions):
+1. Write to Notion FIRST — if Notion fails, skip that row entirely (do NOT write to GHL).
+2. Write to GHL SECOND — if GHL fails, log as warning but count lead as successfully imported.
+3. NO local DB writes — lead_xref and sync_log are not used in the import flow.
+"""
+
+import asyncio
 import json
 import logging
+from datetime import datetime
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from pydantic import BaseModel, Field, field_validator
 
-from db.database import get_session
-from db.models import LeadXref, SyncLog
-from models.lead import LeadCaptureResponse, LeadPayload
+from middleware.auth import require_auth
 from services import ghl, notion
 from services.ghl import normalize_phone, split_phone_field
 from utils.age import calculate_age, calculate_lage
@@ -35,7 +39,8 @@ class BulkLeadItem(BaseModel):
     city: Optional[str] = Field(None, max_length=128)
     state: Optional[str] = Field(None, max_length=2)
     zip_code: Optional[str] = Field(None, max_length=10)
-    birth_year: Optional[int] = Field(None, ge=1900, le=2026)
+    # BUG 8 FIX: Dynamic max year instead of hardcoded 2026
+    birth_year: Optional[int] = Field(None, ge=1900)
     mail_date: Optional[str] = None
     lead_source: Optional[str] = Field(None, max_length=64)
     lead_type: Optional[str] = Field(None, max_length=64)
@@ -46,6 +51,13 @@ class BulkLeadItem(BaseModel):
     mobile_phone: Optional[str] = Field(None, max_length=40)
     spouse_phone: Optional[str] = Field(None, max_length=40)
     notes: Optional[str] = Field(None, max_length=2000)
+
+    @field_validator('birth_year')
+    @classmethod
+    def validate_birth_year(cls, v):
+        if v is not None and v > datetime.now().year:
+            raise ValueError(f'birth_year cannot be in the future (max {datetime.now().year})')
+        return v
 
 
 class BulkImportRequest(BaseModel):
@@ -63,14 +75,25 @@ class BulkImportError(BaseModel):
     lead_name: Optional[str] = None
 
 
+class GHLWarning(BaseModel):
+    """Warning when a lead was saved to Notion but GHL failed."""
+
+    index: int
+    lead_name: str
+    error: str
+
+
 class BulkImportResponse(BaseModel):
     """Response from bulk lead import."""
 
     created: int
+    updated: int = 0
     failed: int
     errors: List[BulkImportError]
+    ghl_warnings: List[GHLWarning] = []
 
 
+# BUG 11 FIX: Moved from /api/public/leads/bulk to /api/leads/bulk (requires auth)
 @router.post(
     "/leads/bulk",
     response_model=BulkImportResponse,
@@ -78,16 +101,23 @@ class BulkImportResponse(BaseModel):
 )
 async def bulk_import_leads(
     req: BulkImportRequest,
-    session: AsyncSession = Depends(get_session),
+    user=Depends(require_auth),
 ) -> BulkImportResponse:
-    """Bulk import leads — push each to GHL + Notion.
+    """Bulk import leads — Notion first (source of truth), then GHL (automations).
 
-    Accepts an array of lead objects. Processes each individually so
-    partial failures don't block the entire batch.
+    Write order:
+    1. Notion FIRST — if Notion fails, skip the row entirely
+    2. GHL SECOND — if GHL fails, log warning but count as success (it's in Notion)
+    3. NO local DB writes — lead_xref/sync_log removed from import flow
+
+    Processes each lead individually so partial failures don't block the batch.
+    100ms delay between GHL API calls to avoid rate limiting.
     """
     created = 0
+    updated = 0
     failed = 0
     errors: List[BulkImportError] = []
+    ghl_warnings: List[GHLWarning] = []
 
     for idx, item in enumerate(req.leads):
         lead_name = f"{item.first_name} {item.last_name}"
@@ -108,75 +138,86 @@ async def bulk_import_leads(
                 created += 1
                 continue
 
-            # Push to GHL
-            ghl_contact = await ghl.upsert_contact(lead_dict)
-            ghl_contact_id = ghl_contact.get("id", "")
-
-            # Create GHL opportunity
+            # ── STEP 1: Notion FIRST (source of truth) ──
+            # If Notion fails, skip this row entirely — do NOT write to GHL
             try:
-                opp_name = (
-                    f"{item.first_name} {item.last_name} — "
-                    f"{item.lead_source or 'bulk-import'}"
-                )
-                await ghl.create_opportunity(
-                    ghl_contact_id,
-                    stage_name="New Lead",
-                    name=opp_name,
+                notion_page_id = await notion.upsert_lead(
+                    lead_dict,
+                    ghl_contact_id="",  # Will be updated after GHL
+                    age=age,
+                    lage_months=lage_months,
                 )
             except Exception as exc:
-                logger.warning(
-                    "GHL opp creation failed for %s (non-fatal): %s",
-                    lead_name,
-                    exc,
-                )
-
-            # Push to Notion
-            notion_page_id = await notion.upsert_lead(
-                lead_dict,
-                ghl_contact_id=ghl_contact_id,
-                age=age,
-                lage_months=lage_months,
-            )
-
-            # Store cross-reference (use normalized primary phone)
-            try:
-                phones = split_phone_field(item.phone)
-                xref_phone = phones[0] if phones else normalize_phone(item.phone)
-
-                existing = await session.execute(
-                    select(LeadXref).where(LeadXref.phone == xref_phone)
-                )
-                xref = existing.scalar_one_or_none()
-
-                if xref:
-                    xref.ghl_contact_id = ghl_contact_id
-                    xref.notion_page_id = notion_page_id
-                    xref.first_name = item.first_name
-                    xref.last_name = item.last_name
-                else:
-                    xref = LeadXref(
-                        ghl_contact_id=ghl_contact_id,
-                        notion_page_id=notion_page_id,
-                        phone=xref_phone,
-                        first_name=item.first_name,
-                        last_name=item.last_name,
+                # Notion failed → skip this row entirely
+                failed += 1
+                errors.append(
+                    BulkImportError(
+                        index=idx,
+                        error=f"Notion write failed: {exc}",
+                        lead_name=lead_name,
                     )
-                    session.add(xref)
-
-                sync_log = SyncLog(
-                    event_type="lead.bulk_import",
-                    direction="inbound",
-                    source_id=xref_phone,
-                    target_id=f"ghl:{ghl_contact_id}|notion:{notion_page_id}",
-                    payload=json.dumps(lead_dict, default=str),
-                    status="ok",
                 )
-                session.add(sync_log)
-            except Exception as exc:
-                logger.error("Xref storage failed for %s: %s", lead_name, exc)
+                logger.warning("Bulk import — Notion failed for %s: %s", lead_name, exc)
+                continue
+
+            # ── STEP 2: GHL SECOND (automations only) ──
+            # If GHL fails, log warning but count as success (lead is in Notion)
+            ghl_contact_id = ""
+            try:
+                ghl_contact = await ghl.upsert_contact(lead_dict)
+                ghl_contact_id = ghl_contact.get("id", "")
+
+                # Create GHL opportunity
+                try:
+                    opp_name = (
+                        f"{item.first_name} {item.last_name} — "
+                        f"{item.lead_source or 'bulk-import'}"
+                    )
+                    await ghl.create_opportunity(
+                        ghl_contact_id,
+                        stage_name="New Lead",
+                        name=opp_name,
+                    )
+                except Exception as opp_exc:
+                    logger.warning(
+                        "GHL opp creation failed for %s (non-fatal): %s",
+                        lead_name, opp_exc,
+                    )
+
+                # Update Notion with GHL contact ID (cross-reference)
+                if ghl_contact_id:
+                    try:
+                        await notion.update_page(notion_page_id, {
+                            "Aggregate Comments": {
+                                "rich_text": [{
+                                    "text": {
+                                        "content": _build_aggregate_comments(ghl_contact_id, item.notes)
+                                    }
+                                }]
+                            }
+                        })
+                    except Exception:
+                        pass  # Non-fatal
+
+            except Exception as ghl_exc:
+                # GHL failed → log warning but count as success (lead is in Notion)
+                ghl_warnings.append(
+                    GHLWarning(
+                        index=idx,
+                        lead_name=lead_name,
+                        error=str(ghl_exc),
+                    )
+                )
+                logger.warning("Bulk import — GHL failed for %s (in Notion): %s", lead_name, ghl_exc)
+
+            # BUG 7 FIX: No local DB writes (lead_xref/sync_log removed)
 
             created += 1
-            logger.info("Bulk import — created: %s", lead_name)
+            logger.info("Bulk import — created: %s (Notion:%s, GHL:%s)", lead_name, notion_page_id, ghl_contact_id or "SKIPPED")
+
+            # Rate limiting delay between GHL calls
+            if not req.dry_run and idx < len(req.leads) - 1:
+                await asyncio.sleep(0.1)
 
         except Exception as exc:
             failed += 1
@@ -190,13 +231,34 @@ async def bulk_import_leads(
             logger.warning("Bulk import — failed %s: %s", lead_name, exc)
 
     logger.info(
-        "Bulk import complete: %d created, %d failed out of %d",
-        created,
-        failed,
-        len(req.leads),
+        "Bulk import complete: %d created, %d failed, %d GHL warnings out of %d",
+        created, failed, len(ghl_warnings), len(req.leads),
     )
 
-    return BulkImportResponse(created=created, failed=failed, errors=errors)
+    return BulkImportResponse(
+        created=created,
+        updated=updated,
+        failed=failed,
+        errors=errors,
+        ghl_warnings=ghl_warnings,
+    )
+
+
+def _build_aggregate_comments(ghl_id: str, notes: Optional[str]) -> str:
+    """BUG 4 FIX: Always write GHL ID first, append notes after.
+
+    Format: GHL:{id} | {notes}
+    Never overwrite the GHL ID portion.
+    """
+    base = f"GHL:{ghl_id}" if ghl_id else ""
+    if notes:
+        return f"{base} | {notes}"[:2000]
+    return base
+
+
+# ── Single lead capture (kept for backwards compatibility) ──
+
+from models.lead import LeadCaptureResponse, LeadPayload
 
 
 @router.post(
@@ -206,20 +268,19 @@ async def bulk_import_leads(
 )
 async def capture_lead(
     payload: LeadPayload,
-    session: AsyncSession = Depends(get_session),
+    user=Depends(require_auth),
 ):
-    """Capture a new lead and push to both GHL and Notion.
+    """Capture a new lead — Notion first, then GHL.
 
-    1. Validate the payload.
-    2. Calculate age from birth_year and lage_months from mail_date.
-    3. Upsert contact + create opportunity in GHL.
-    4. Upsert lead page in Notion (with GHL contact ID for xref).
-    5. Store the cross-reference (ghl_id ↔ notion_id ↔ phone).
-    6. Return IDs and calculated fields.
+    1. Calculate age from birth_year and lage_months from mail_date.
+    2. Upsert lead page in Notion (source of truth).
+    3. Upsert contact + create opportunity in GHL (automations).
+    4. Update Notion with GHL contact ID cross-reference.
+    5. Return IDs and calculated fields.
     """
     lead_dict = payload.model_dump()
 
-    # Normalize source — prefer lead_source over source
+    # Normalize source
     if payload.lead_source and not payload.source:
         lead_dict["source"] = payload.lead_source
 
@@ -229,33 +290,11 @@ async def capture_lead(
         calculate_lage(payload.mail_date.isoformat()) if payload.mail_date else None
     )
 
-    # --- Push to GHL ---
-    try:
-        ghl_contact = await ghl.upsert_contact(lead_dict)
-        ghl_contact_id = ghl_contact.get("id", "")
-    except Exception as exc:
-        logger.error("GHL upsert_contact failed: %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Failed to push lead to GHL: {exc}",
-        )
-
-    # Create opportunity in GHL
-    try:
-        opp_name = f"{payload.first_name} {payload.last_name} — {payload.lead_source or payload.source or 'web'}"
-        await ghl.create_opportunity(
-            ghl_contact_id,
-            stage_name="New Lead",
-            name=opp_name,
-        )
-    except Exception as exc:
-        logger.warning("GHL create_opportunity failed (non-fatal): %s", exc)
-
-    # --- Push to Notion ---
+    # --- STEP 1: Notion FIRST ---
     try:
         notion_page_id = await notion.upsert_lead(
             lead_dict,
-            ghl_contact_id=ghl_contact_id,
+            ghl_contact_id="",
             age=age,
             lage_months=lage_months,
         )
@@ -266,52 +305,47 @@ async def capture_lead(
             detail=f"Failed to push lead to Notion: {exc}",
         )
 
-    # --- Store cross-reference (use normalized primary phone) ---
+    # --- STEP 2: GHL SECOND ---
+    ghl_contact_id = ""
     try:
-        phones = split_phone_field(payload.phone)
-        xref_phone = phones[0] if phones else normalize_phone(payload.phone)
+        ghl_contact = await ghl.upsert_contact(lead_dict)
+        ghl_contact_id = ghl_contact.get("id", "")
 
-        existing = await session.execute(
-            select(LeadXref).where(LeadXref.phone == xref_phone)
-        )
-        xref = existing.scalar_one_or_none()
-
-        if xref:
-            xref.ghl_contact_id = ghl_contact_id
-            xref.notion_page_id = notion_page_id
-            xref.first_name = payload.first_name
-            xref.last_name = payload.last_name
-        else:
-            xref = LeadXref(
-                ghl_contact_id=ghl_contact_id,
-                notion_page_id=notion_page_id,
-                phone=xref_phone,
-                first_name=payload.first_name,
-                last_name=payload.last_name,
+        # Create opportunity
+        try:
+            opp_name = f"{payload.first_name} {payload.last_name} — {payload.lead_source or payload.source or 'web'}"
+            await ghl.create_opportunity(
+                ghl_contact_id,
+                stage_name="New Lead",
+                name=opp_name,
             )
-            session.add(xref)
+        except Exception as exc:
+            logger.warning("GHL create_opportunity failed (non-fatal): %s", exc)
 
-        # Log the sync event
-        sync_log = SyncLog(
-            event_type="lead.captured",
-            direction="inbound",
-            source_id=xref_phone,
-            target_id=f"ghl:{ghl_contact_id}|notion:{notion_page_id}",
-            payload=json.dumps(lead_dict, default=str),
-            status="ok",
-        )
-        session.add(sync_log)
+        # Update Notion with GHL ID
+        if ghl_contact_id:
+            try:
+                notes = lead_dict.get("notes", "")
+                await notion.update_page(notion_page_id, {
+                    "Aggregate Comments": {
+                        "rich_text": [{
+                            "text": {
+                                "content": _build_aggregate_comments(ghl_contact_id, notes)
+                            }
+                        }]
+                    }
+                })
+            except Exception:
+                pass
 
     except Exception as exc:
-        logger.error("Failed to store xref: %s", exc)
-        # Non-fatal — lead is already in GHL and Notion
+        # GHL failed but lead is in Notion — log warning, don't fail
+        logger.warning("GHL upsert_contact failed (lead in Notion): %s", exc)
 
     logger.info(
-        "Lead captured: %s %s → GHL:%s / Notion:%s",
-        payload.first_name,
-        payload.last_name,
-        ghl_contact_id,
-        notion_page_id,
+        "Lead captured: %s %s → Notion:%s / GHL:%s",
+        payload.first_name, payload.last_name,
+        notion_page_id, ghl_contact_id or "FAILED",
     )
 
     return LeadCaptureResponse(
