@@ -4,7 +4,7 @@ __pycache__/
 *.so
 *.egg-info/
 # Frontend build output — built by Render during deploy
-frontend/dist/
+# frontend/dist/
 build/
 .eggs/
 
@@ -29,7 +29,7 @@ Thumbs.db
 
 # Frontend
 frontend/node_modules/
-# frontend/dist/ is built by Render during deploy (Node available in native builds)
+# # frontend/dist/ is built by Render during deploy (Node available in native builds)
 
 # Alembic
 alembic/versions/__pycache__/
