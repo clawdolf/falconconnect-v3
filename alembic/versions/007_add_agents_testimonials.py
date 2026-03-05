@@ -70,7 +70,7 @@ def upgrade() -> None:
     op.execute(
         f"""INSERT INTO agents (user_id, slug, name, title, bio, phone, phone_display, email, npn, location, carrier_count, carriers_json, is_active, created_at, updated_at)
         VALUES (
-            '72dc5b7c-ba2c-4a1d-83b9-733ff600c0d5',
+            'user_3ASrwDOrSTaDxCus6f1B5lnDsgz',
             'seb',
             'Sébastien Taillieu',
             'Founder & Principal Advisor',

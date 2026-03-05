@@ -1,105 +1,9 @@
-import { useState, useRef, useCallback, useEffect } from 'react'
+import { useState, useRef, useCallback } from 'react'
 import * as XLSX from 'xlsx'
-
-/* ── Constants ── */
-const VENDOR_TIERS = {
-  'HOFLeads': ['Diamond', 'Gold', 'Silver'],
-  'Proven Leads': ['N/A'],
-  'Aria Leads': ['Gold', 'Silver', 'N/A'],
-  'MilMo': ['Gold', 'Silver', 'N/A'],
-}
-const NEEDS_LEAD_AGE = { 'HOFLeads': false, 'Proven Leads': true, 'Aria Leads': true, 'MilMo': true }
-const LEAD_AGE_BUCKETS = ['7–12M', '13–24M', '25–36M', '37–48M', '49–60M', '60+M']
-const LEAD_TYPES = ['Mortgage Protection', 'Final Expense', 'Annuity', 'IUL']
-const LEAD_VENDORS = Object.keys(VENDOR_TIERS)
-
-const LEAD_FIELDS = [
-  { value: 'first_name', label: 'First Name' },
-  { value: 'last_name', label: 'Last Name' },
-  { value: 'phone', label: 'Phone' },
-  { value: 'email', label: 'Email' },
-  { value: 'address', label: 'Address' },
-  { value: 'city', label: 'City' },
-  { value: 'state', label: 'State' },
-  { value: 'zip_code', label: 'ZIP Code' },
-  { value: 'birth_year', label: 'Birth Year' },
-  { value: 'lead_source', label: 'Lead Source' },
-  { value: 'lead_type', label: 'Lead Type' },
-  { value: 'lead_age_bucket', label: 'Lead Age Bucket' },
-  { value: 'lender', label: 'Lender' },
-  { value: 'mail_date', label: 'Mail Date' },
-  { value: 'notes', label: 'Notes' },
-]
-
-const COLUMN_ALIASES = {
-  'first name': 'first_name', 'firstname': 'first_name', 'fname': 'first_name',
-  'last name': 'last_name', 'lastname': 'last_name', 'lname': 'last_name',
-  'phone': 'phone', 'cell': 'phone', 'cell phone': 'phone', 'mobile': 'phone', 'mobile phone': 'phone',
-  'email': 'email', 'e-mail': 'email',
-  'address': 'address', 'street': 'address', 'street address': 'address',
-  'city': 'city', 'state': 'state', 'st': 'state',
-  'zip': 'zip_code', 'zip_code': 'zip_code', 'zipcode': 'zip_code', 'zip code': 'zip_code', 'postal': 'zip_code',
-  'birth year': 'birth_year', 'birth_year': 'birth_year', 'birthyear': 'birth_year', 'dob': 'birth_year',
-  'source': 'lead_source', 'lead source': 'lead_source', 'lead_source': 'lead_source', 'vendor': 'lead_source',
-  'type': 'lead_type', 'lead type': 'lead_type', 'lead_type': 'lead_type',
-  'lead age': 'lead_age_bucket', 'lender': 'lender', 'mortgage company': 'lender',
-  'mail date': 'mail_date', 'mail_date': 'mail_date', 'maildate': 'mail_date',
-  'notes': 'notes', 'note': 'notes', 'comments': 'notes',
-}
-
-function autoMapHeaders(hdrs) {
-  const m = {}
-  hdrs.forEach(h => {
-    const lw = h.toLowerCase().trim()
-    if (COLUMN_ALIASES[lw]) { m[h] = COLUMN_ALIASES[lw]; return }
-    const match = LEAD_FIELDS.find(f => f.label.toLowerCase() === lw || f.value === lw)
-    if (match) m[h] = match.value
-  })
-  return m
-}
-
-function autoDetectVendor(filename) {
-  const fn = filename.toLowerCase()
-  const out = { vendor: 'HOFLeads', tier: 'Diamond', leadType: 'Mortgage Protection' }
-  if (fn.includes('hof')) {
-    out.vendor = 'HOFLeads'
-    if (fn.includes('gold') || fn.includes('t2')) out.tier = 'Gold'
-    else if (fn.includes('silver') || fn.includes('t3')) out.tier = 'Silver'
-  } else if (fn.includes('proven')) { out.vendor = 'Proven Leads'; out.tier = 'N/A' }
-  else if (fn.includes('aria')) { out.vendor = 'Aria Leads'; out.tier = 'Gold' }
-  else if (fn.includes('milmo')) { out.vendor = 'MilMo'; out.tier = 'Gold' }
-  if (fn.includes('final expense') || fn.includes('_fe_')) out.leadType = 'Final Expense'
-  else if (fn.includes('annuity')) out.leadType = 'Annuity'
-  else if (fn.includes('iul')) out.leadType = 'IUL'
-  return out
-}
-
-function buildLeads(rows, headers, columnMap, vendor, tier, leadType, leadAge, purchaseDate) {
-  const leads = []
-  for (const row of rows) {
-    const lead = {}
-    headers.forEach((h, i) => {
-      const field = columnMap[h]
-      if (field && row[i] !== undefined && row[i] !== null && String(row[i]).trim()) {
-        lead[field] = String(row[i]).trim()
-      }
-    })
-    if (!lead.first_name || !lead.last_name || !lead.phone) continue
-    if (vendor && !lead.lead_source) lead.lead_source = vendor + (tier && tier !== 'N/A' ? ' / ' + tier : '')
-    if (leadType && !lead.lead_type) lead.lead_type = leadType
-    if (leadAge) lead.lead_age_bucket = leadAge
-    if (purchaseDate && !lead.mail_date) lead.mail_date = purchaseDate
-    if (lead.birth_year) { const yr = parseInt(lead.birth_year, 10); lead.birth_year = isNaN(yr) ? undefined : yr }
-    leads.push(lead)
-  }
-  return leads
-}
-
-const STEP_LABELS = {
-  source: 'Source', file: 'Upload', sheets: 'Sheets',
-  mapping: 'Map Columns', metadata: 'Lead Details',
-  preview: 'Preview', importing: 'Importing', results: 'Results',
-}
+import {
+  VENDOR_TIERS, NEEDS_LEAD_AGE, LEAD_AGE_BUCKETS, LEAD_TYPES, LEAD_VENDORS,
+  LEAD_FIELDS, STEP_LABELS, autoMapHeaders, autoDetectVendor, buildLeads,
+} from '../utils/leadImportUtils'
 
 /* ── Main Component ── */
 function LeadImport() {
@@ -124,14 +28,30 @@ function LeadImport() {
   const [error, setError] = useState(null)
   const [dryRun, setDryRun] = useState(false)
 
-  // Auth (Clerk optional)
+  // Auth (Clerk)
   let getToken = null
   try { const { useAuth } = require('@clerk/clerk-react'); const auth = useAuth(); getToken = auth.getToken } catch { /* no-op */ }
 
   const getHeaders = async () => {
     const h = { 'Content-Type': 'application/json' }
-    if (getToken) { try { const t = await getToken(); if (t) h['Authorization'] = 'Bearer ' + t } catch { /* no-op */ } }
+    if (getToken) {
+      try {
+        const t = await getToken()
+        if (t) h['Authorization'] = 'Bearer ' + t
+      } catch { /* no-op */ }
+    }
     return h
+  }
+
+  // BUG 2 FIX: Get Google OAuth token from Clerk for Sheets API
+  const getGoogleToken = async () => {
+    if (!getToken) return null
+    try {
+      const t = await getToken({ template: 'google' })
+      return t || null
+    } catch {
+      return null
+    }
   }
 
   const resetWizard = () => {
@@ -172,44 +92,123 @@ function LeadImport() {
     if (e.dataTransfer.files?.[0]) parseFile(e.dataTransfer.files[0])
   }, [])
 
+  // BUG 1 + 2 FIX: Use correct route (/api/sheets/data) and send X-Google-Token header
   const fetchSheet = async () => {
     const m = sheetUrl.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/); const id = m ? m[1] : sheetUrl.trim()
     if (!id) { setError('Enter a valid Sheets URL or ID'); return }
     setSheetLoading(true); setError(null)
     try {
       const hdrs = await getHeaders()
-      const resp = await fetch('/api/public/sheets/data?sheet_id=' + encodeURIComponent(id), { headers: hdrs })
-      if (resp.status === 404 || resp.status === 501) { setError('Google Sheets API not configured. Export as CSV and use file upload.'); return }
-      if (!resp.ok) throw new Error('Could not fetch sheet data.')
+      // BUG 2: Get Google OAuth token and send as X-Google-Token header
+      const googleToken = await getGoogleToken()
+      if (googleToken) {
+        hdrs['X-Google-Token'] = googleToken
+      }
+      // BUG 1 FIX: Use /api/sheets/data (matching backend mount point)
+      const resp = await fetch('/api/sheets/data?sheet_id=' + encodeURIComponent(id), { headers: hdrs })
+      if (resp.status === 400 && !googleToken) {
+        setError('Google Sheets requires signing in with Google. Sign out and sign in with your Google account, or export as CSV and use file upload.')
+        return
+      }
+      if (resp.status === 404 || resp.status === 501) {
+        setError('Google Sheets API not configured. Export as CSV and use file upload.')
+        return
+      }
+      if (!resp.ok) {
+        const body = await resp.json().catch(() => ({}))
+        throw new Error(body.detail || 'Could not fetch sheet data.')
+      }
       const data = await resp.json()
       setHeaders(data.headers || []); setParsedRows(data.rows || []); setColumnMap(autoMapHeaders(data.headers || []))
-      setFileName('Google Sheet'); setStep('mapping')
+      setFileName(data.sheet_title || 'Google Sheet'); setStep('mapping')
     } catch (err) { setError(err.message) }
     finally { setSheetLoading(false) }
   }
 
   const mappingOk = ['first_name', 'last_name', 'phone'].every(f => Object.values(columnMap).includes(f))
 
+  // BUG 11 FIX: Use authenticated endpoint /api/leads/bulk instead of /api/public/leads/bulk
   const doImport = async () => {
-    const leads = buildLeads(parsedRows, headers, columnMap, vendor, tier, leadType, leadAge, purchaseDate)
+    const { leads, droppedCount } = buildLeads(parsedRows, headers, columnMap, vendor, tier, leadType, leadAge, purchaseDate)
     if (!leads.length) { setError('No valid leads. Ensure required fields are mapped.'); return }
     setStep('importing'); setError(null); setProgress({ current: 0, total: leads.length })
-    const hdrs = await getHeaders(); const BS = 50; let created = 0, failed = 0; const errors = []
+    const hdrs = await getHeaders()
+    const BS = 50
+    let created = 0, updated = 0, failed = 0
+    const errors = []
+    const ghlWarnings = []
+
     for (let i = 0; i < leads.length; i += BS) {
       const batch = leads.slice(i, i + BS)
       try {
-        const resp = await fetch('/api/public/leads/bulk', { method: 'POST', headers: hdrs, body: JSON.stringify({ leads: batch, dry_run: dryRun }) })
-        if (resp.ok) { const d = await resp.json(); created += d.created || 0; failed += d.failed || 0; if (d.errors) errors.push(...d.errors) }
-        else {
+        // BUG 11 FIX: Authenticated endpoint
+        const resp = await fetch('/api/leads/bulk', {
+          method: 'POST',
+          headers: hdrs,
+          body: JSON.stringify({ leads: batch, dry_run: dryRun })
+        })
+        if (resp.ok) {
+          const d = await resp.json()
+          created += d.created || 0
+          updated += d.updated || 0
+          failed += d.failed || 0
+          if (d.errors) errors.push(...d.errors)
+          if (d.ghl_warnings) ghlWarnings.push(...d.ghl_warnings)
+        } else {
+          // If bulk fails, try individual
           for (const l of batch) {
-            try { const r = await fetch('/api/public/leads/capture', { method: 'POST', headers: hdrs, body: JSON.stringify(l) }); if (r.ok) created++; else failed++ }
-            catch { failed++ }
+            try {
+              const r = await fetch('/api/leads/capture', {
+                method: 'POST',
+                headers: hdrs,
+                body: JSON.stringify(l)
+              })
+              if (r.ok) created++
+              else failed++
+            } catch { failed++ }
           }
         }
       } catch { failed += batch.length }
       setProgress({ current: Math.min(i + BS, leads.length), total: leads.length })
+      // Small delay between batches to avoid rate limiting
+      if (i + BS < leads.length) await new Promise(r => setTimeout(r, 100))
     }
-    setResult({ created, failed, errors }); setStep('results')
+    setResult({ created, updated, failed, errors, ghlWarnings, droppedCount }); setStep('results')
+  }
+
+  const retryFailed = async () => {
+    if (!result?.errors?.length) return
+    // Rebuild only the failed leads from parsedRows by index
+    const failedIndices = new Set(result.errors.map(e => e.index))
+    const { leads: failedLeads } = buildLeads(
+      parsedRows.filter((_, i) => failedIndices.has(i)),
+      headers, columnMap, vendor, tier, leadType, leadAge, purchaseDate
+    )
+    if (!failedLeads.length) { setError('No retryable leads.'); return }
+    setStep('importing'); setError(null); setProgress({ current: 0, total: failedLeads.length })
+    const hdrs = await getHeaders()
+    let created = 0, failed = 0; const errors = []; const ghlWarnings = []
+    try {
+      const resp = await fetch('/api/leads/bulk', {
+        method: 'POST', headers: hdrs,
+        body: JSON.stringify({ leads: failedLeads, dry_run: dryRun })
+      })
+      if (resp.ok) {
+        const d = await resp.json()
+        created = d.created || 0; failed = d.failed || 0
+        if (d.errors) errors.push(...d.errors)
+        if (d.ghl_warnings) ghlWarnings.push(...d.ghl_warnings)
+      } else { failed = failedLeads.length }
+    } catch { failed = failedLeads.length }
+    setProgress({ current: failedLeads.length, total: failedLeads.length })
+    setResult(prev => ({
+      ...prev,
+      created: (prev?.created || 0) + created,
+      failed,
+      errors,
+      ghlWarnings: [...(prev?.ghlWarnings || []), ...ghlWarnings],
+    }))
+    setStep('results')
   }
 
   const goBack = () => {
@@ -219,9 +218,15 @@ function LeadImport() {
     else setStep('source')
   }
 
-  const previewLeads = step === 'preview'
+  const previewData = step === 'preview'
     ? buildLeads(parsedRows.slice(0, 5), headers, columnMap, vendor, tier, leadType, leadAge, purchaseDate)
-    : []
+    : { leads: [], droppedCount: 0 }
+  const previewLeads = previewData.leads
+
+  // Full count for the preview summary
+  const fullBuildData = step === 'preview'
+    ? buildLeads(parsedRows, headers, columnMap, vendor, tier, leadType, leadAge, purchaseDate)
+    : { leads: [], droppedCount: 0 }
 
   const stepFlow = ['mapping', 'metadata', 'preview', 'importing', 'results']
   const stepIdx = stepFlow.indexOf(step)
@@ -332,7 +337,7 @@ function LeadImport() {
               <input className="form-input" style={{ flex: 1 }} placeholder="https://docs.google.com/spreadsheets/d/..." value={sheetUrl} onChange={e => setSheetUrl(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') fetchSheet() }} />
               <button className="btn btn-primary" onClick={fetchSheet} disabled={!sheetUrl.trim() || sheetLoading}>{sheetLoading ? 'Loading...' : 'Fetch'}</button>
             </div>
-            <p className="form-hint" style={{ marginTop: '0.75rem' }}>If Google Sheets API is not configured, export as CSV and use file upload.</p>
+            <p className="form-hint" style={{ marginTop: '0.75rem' }}>Requires Google sign-in with Sheets access. Otherwise, export as CSV and use file upload.</p>
           </div>
         )}
 
@@ -394,7 +399,7 @@ function LeadImport() {
             </div>
             {NEEDS_LEAD_AGE[vendor] && (
               <div className="form-field" style={{ marginTop: '0.75rem' }}>
-                <label className="form-label">Lead Age Bucket</label>
+                <label className="form-label">Lead Age Bucket <span style={{ fontWeight: 400, color: 'var(--text-muted)', fontSize: '0.65rem' }}>(applied only to rows without their own value)</span></label>
                 <select className="form-input" value={leadAge} onChange={e => setLeadAge(e.target.value)}>
                   <option value="">N/A</option>
                   {LEAD_AGE_BUCKETS.map(a => <option key={a} value={a}>{a}</option>)}
@@ -412,7 +417,10 @@ function LeadImport() {
           <div>
             <div className="preview-summary">
               <div className="preview-summary-grid">
-                <span><strong style={{ color: 'var(--text)' }}>{parsedRows.length}</strong> leads to import</span>
+                <span><strong style={{ color: 'var(--text)' }}>{fullBuildData.leads.length}</strong> leads to import</span>
+                {fullBuildData.droppedCount > 0 && (
+                  <span style={{ color: 'var(--amber)' }}><strong>{fullBuildData.droppedCount}</strong> rows dropped (missing name/phone)</span>
+                )}
                 <span>Source: <strong style={{ color: 'var(--text)' }}>{fileName}</strong></span>
                 <span>Vendor: <strong style={{ color: 'var(--text)' }}>{vendor} / {tier}</strong></span>
                 <span>Type: <strong style={{ color: 'var(--text)' }}>{leadType}</strong></span>
@@ -423,18 +431,20 @@ function LeadImport() {
             {previewLeads.length > 0 && (
               <div className="table-scroll-wrapper" style={{ maxHeight: 240, marginBottom: '1rem' }}>
                 <table className="results-table">
-                  <thead><tr><th>#</th><th>Name</th><th>Phone</th><th>Email</th><th>Source</th></tr></thead>
+                  <thead><tr><th>#</th><th>Name</th><th>Phone</th><th>Email</th><th>Source</th><th>Type</th></tr></thead>
                   <tbody>
                     {previewLeads.map((l, i) => (
-                      <tr key={i}><td>{i + 1}</td><td>{l.first_name} {l.last_name}</td><td>{l.phone}</td><td>{l.email || '—'}</td><td>{l.lead_source || '—'}</td></tr>
+                      <tr key={i}><td>{i + 1}</td><td>{l.first_name} {l.last_name}</td><td>{l.phone}</td><td>{l.email || '—'}</td><td>{l.lead_source || '—'}</td><td>{l.lead_type || '—'}</td></tr>
                     ))}
                   </tbody>
                 </table>
               </div>
             )}
-            <p className="form-hint">Showing first {previewLeads.length} of {parsedRows.length} leads. Dual push: GHL + Notion.</p>
+            <p className="form-hint">Showing first {previewLeads.length} of {fullBuildData.leads.length} leads. Write order: Notion first, then GHL.</p>
             <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1rem', gap: '0.5rem' }}>
-              <button className="btn btn-primary" onClick={doImport}>Import {parsedRows.length} Leads</button>
+              <button className="btn btn-primary" onClick={doImport}>
+                {dryRun ? `Dry Run ${fullBuildData.leads.length} Leads` : `Import ${fullBuildData.leads.length} Leads`}
+              </button>
             </div>
           </div>
         )}
@@ -442,7 +452,9 @@ function LeadImport() {
         {/* IMPORTING */}
         {step === 'importing' && (
           <div style={{ textAlign: 'center', padding: '3rem 0' }}>
-            <p style={{ fontFamily: 'var(--font-display)', fontSize: '0.9rem', fontWeight: 600, color: 'var(--text)', marginBottom: '1rem' }}>Importing leads...</p>
+            <p style={{ fontFamily: 'var(--font-display)', fontSize: '0.9rem', fontWeight: 600, color: 'var(--text)', marginBottom: '1rem' }}>
+              {dryRun ? 'Validating leads...' : 'Importing leads...'}
+            </p>
             <div className="progress-bar-container" style={{ marginBottom: '0.5rem' }}>
               <div className="progress-bar" style={{ width: (progress.total > 0 ? (progress.current / progress.total * 100) : 0) + '%' }} />
             </div>
@@ -450,29 +462,56 @@ function LeadImport() {
           </div>
         )}
 
-        {/* RESULTS */}
+        {/* RESULTS — Enhanced completion screen */}
         {step === 'results' && result && (
           <div>
             <div style={{ textAlign: 'center', padding: '1.5rem 0' }}>
               <div style={{ width: 48, height: 48, borderRadius: '50%', background: result.failed === 0 ? 'oklch(18% 0.04 145)' : 'oklch(18% 0.04 75)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 0.75rem', color: result.failed === 0 ? 'var(--green)' : 'var(--amber)', fontSize: '1.5rem' }}>{result.failed === 0 ? '✓' : '!'}</div>
               <h3 className="section-title" style={{ borderBottom: 'none', marginBottom: '0.25rem' }}>{dryRun ? 'Dry Run Complete' : 'Import Complete'}</h3>
               {dryRun && <div style={{ display: 'inline-block', fontFamily: 'var(--font-mono)', fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'oklch(15% 0.01 85)', background: 'var(--accent)', borderRadius: 3, padding: '0.15rem 0.5rem', marginBottom: '0.5rem' }}>DRY RUN — No data was written</div>}
-              <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8rem', display: 'flex', justifyContent: 'center', gap: '1.5rem', marginTop: '0.5rem' }}>
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8rem', display: 'flex', justifyContent: 'center', gap: '1.5rem', marginTop: '0.5rem', flexWrap: 'wrap' }}>
                 <span style={{ color: 'var(--green)' }}>{result.created} created</span>
+                {(result.updated || 0) > 0 && <span style={{ color: 'var(--accent)' }}>{result.updated} updated</span>}
                 {result.failed > 0 && <span style={{ color: 'var(--red)' }}>{result.failed} failed</span>}
+                {(result.ghlWarnings?.length || 0) > 0 && <span style={{ color: 'var(--amber)' }}>{result.ghlWarnings.length} GHL warnings</span>}
+                {(result.droppedCount || 0) > 0 && <span style={{ color: 'var(--text-muted)' }}>{result.droppedCount} rows dropped (missing required fields)</span>}
               </div>
             </div>
+
+            {/* Failed rows */}
             {result.errors && result.errors.length > 0 && (
-              <div style={{ maxHeight: 160, overflow: 'auto', marginBottom: '1rem' }}>
-                {result.errors.slice(0, 15).map((e, i) => (
-                  <div key={i} className="alert alert-error" style={{ marginTop: i > 0 ? '0.375rem' : 0, fontSize: '0.7rem', padding: '0.375rem 0.625rem' }}>
-                    Row {e.index + 1}{e.lead_name ? ' (' + e.lead_name + ')' : ''}: {e.error}
-                  </div>
-                ))}
-                {result.errors.length > 15 && <p className="form-hint">...and {result.errors.length - 15} more errors</p>}
+              <div style={{ marginBottom: '1rem' }}>
+                <h4 style={{ fontFamily: 'var(--font-display)', fontSize: '0.75rem', fontWeight: 600, color: 'var(--red)', marginBottom: '0.5rem' }}>Failed Rows</h4>
+                <div style={{ maxHeight: 160, overflow: 'auto' }}>
+                  {result.errors.slice(0, 20).map((e, i) => (
+                    <div key={i} className="alert alert-error" style={{ marginTop: i > 0 ? '0.375rem' : 0, fontSize: '0.7rem', padding: '0.375rem 0.625rem' }}>
+                      Row {e.index + 1}{e.lead_name ? ' (' + e.lead_name + ')' : ''}: {e.error}
+                    </div>
+                  ))}
+                  {result.errors.length > 20 && <p className="form-hint">...and {result.errors.length - 20} more errors</p>}
+                </div>
               </div>
             )}
+
+            {/* GHL warnings */}
+            {result.ghlWarnings && result.ghlWarnings.length > 0 && (
+              <div style={{ marginBottom: '1rem' }}>
+                <h4 style={{ fontFamily: 'var(--font-display)', fontSize: '0.75rem', fontWeight: 600, color: 'var(--amber)', marginBottom: '0.5rem' }}>GHL Warnings (leads saved to Notion but not GHL)</h4>
+                <div style={{ maxHeight: 120, overflow: 'auto' }}>
+                  {result.ghlWarnings.slice(0, 10).map((w, i) => (
+                    <div key={i} style={{ background: 'oklch(18% 0.04 75)', border: '1px solid oklch(25% 0.05 75)', color: 'var(--amber)', padding: '0.375rem 0.625rem', fontFamily: 'var(--font-mono)', fontSize: '0.7rem', borderRadius: 2, marginTop: i > 0 ? '0.375rem' : 0 }}>
+                      {w.lead_name}: {w.error}
+                    </div>
+                  ))}
+                  {result.ghlWarnings.length > 10 && <p className="form-hint">...and {result.ghlWarnings.length - 10} more warnings</p>}
+                </div>
+              </div>
+            )}
+
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', marginTop: '1rem' }}>
+              {result.failed > 0 && result.errors?.length > 0 && (
+                <button className="btn" onClick={retryFailed}>Retry {result.failed} Failed</button>
+              )}
               <button className="btn btn-primary" onClick={resetWizard}>Import More</button>
             </div>
           </div>

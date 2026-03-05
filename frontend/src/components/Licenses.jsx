@@ -15,6 +15,9 @@ const STATE_MAP = {
 }
 const STATE_NAMES = Object.keys(STATE_MAP)
 
+// States where license number is required for consumer manual verification
+const REQUIRE_LICENSE_NUMBER = new Set(['TX', 'PA', 'ME', 'CA', 'NY'])
+
 /* ── State autocomplete input ── */
 function StateInput({ value, onChange, onSelect }) {
   const [query, setQuery] = useState(value || '')
@@ -121,6 +124,7 @@ function Licenses() {
   const [editingId, setEditingId] = useState(null)
   const [deleteConfirm, setDeleteConfirm] = useState(null)
   const [submitting, setSubmitting] = useState(false)
+  const [healthStatus, setHealthStatus] = useState({}) // { url: boolean }
 
   const blankForm = { state: '', state_abbreviation: '', license_number: '' }
   const [formData, setFormData] = useState(blankForm)
@@ -139,18 +143,49 @@ function Licenses() {
     setLoading(true); setError(null)
     try {
       const headers = await getHeaders()
-      // /me returns only the current authed user's licenses
       const resp = await fetch('/api/licenses/me', { headers })
       if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${resp.statusText}`)
-      setLicenses(await resp.json())
+      const data = await resp.json()
+      setLicenses(data)
+      // Kick off async health check for verify URLs
+      runHealthCheck(data, headers)
     } catch (err) { setError(err.message) }
     finally { setLoading(false) }
   }
 
+  const runHealthCheck = async (licenseList, headers) => {
+    const urls = licenseList
+      .filter(l => l.verify_url)
+      .map(l => l.verify_url)
+    if (urls.length === 0) return
+    try {
+      const resp = await fetch('/api/licenses/health-check', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ urls }),
+      })
+      if (resp.ok) {
+        const results = await resp.json()
+        const statusMap = {}
+        results.forEach(r => { statusMap[r.url] = r.ok })
+        setHealthStatus(statusMap)
+      }
+    } catch {
+      // Health check is best-effort, don't block UI
+    }
+  }
+
   useEffect(() => { fetchLicenses() }, [])
+
+  // Check if license number is required for the currently selected add-form state
+  const addFormRequiresLicenseNum = REQUIRE_LICENSE_NUMBER.has(formData.state_abbreviation)
 
   const handleAdd = async () => {
     if (!formData.state) { setError('Select a state.'); return }
+    if (addFormRequiresLicenseNum && !formData.license_number.trim()) {
+      setError(`License number is required for ${formData.state_abbreviation}. Consumers need it to verify your license.`)
+      return
+    }
     setSubmitting(true); setError(null)
     try {
       const headers = await getHeaders()
@@ -161,7 +196,11 @@ function Licenses() {
         license_type: 'insurance_producer',
       }
       const resp = await fetch('/api/licenses', { method: 'POST', headers, body: JSON.stringify(body) })
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${resp.statusText}`)
+      if (!resp.ok) {
+        const errData = await resp.json().catch(() => null)
+        const detail = errData?.detail || `HTTP ${resp.status}: ${resp.statusText}`
+        throw new Error(detail)
+      }
       setShowAddForm(false); setFormData(blankForm); await fetchLicenses()
     } catch (err) { setError(err.message) }
     finally { setSubmitting(false) }
@@ -177,7 +216,11 @@ function Licenses() {
         license_number: editData.license_number || null,
       }
       const resp = await fetch(`/api/licenses/${id}`, { method: 'PUT', headers, body: JSON.stringify(body) })
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${resp.statusText}`)
+      if (!resp.ok) {
+        const errData = await resp.json().catch(() => null)
+        const detail = errData?.detail || `HTTP ${resp.status}: ${resp.statusText}`
+        throw new Error(detail)
+      }
       setEditingId(null); setEditData({}); await fetchLicenses()
     } catch (err) { setError(err.message) }
     finally { setSubmitting(false) }
@@ -202,6 +245,26 @@ function Licenses() {
   }
 
   const statusBadge = (s) => s === 'active' ? 'badge-success' : s === 'expired' ? 'badge-error' : 'badge-warn'
+
+  // Health dot component
+  const HealthDot = ({ url }) => {
+    if (!url || !(url in healthStatus)) return null
+    const ok = healthStatus[url]
+    return (
+      <span
+        title={ok ? 'URL reachable' : 'URL unreachable'}
+        style={{
+          display: 'inline-block',
+          width: 7,
+          height: 7,
+          borderRadius: '50%',
+          background: ok ? '#22c55e' : '#ef4444',
+          marginRight: 5,
+          flexShrink: 0,
+        }}
+      />
+    )
+  }
 
   return (
     <div className="dashboard">
@@ -244,7 +307,12 @@ function Licenses() {
                       <td><span className={`badge ${statusBadge(lic.status)}`}>{lic.status}</span></td>
                       <td>
                         {lic.verify_url
-                          ? <a href={lic.verify_url} target="_blank" rel="noopener noreferrer" className="c-accent" style={{ fontFamily: 'var(--font-mono)', fontSize: '0.75rem' }}>Verify ↗</a>
+                          ? (
+                            <span style={{ display: 'flex', alignItems: 'center' }}>
+                              <HealthDot url={lic.verify_url} />
+                              <a href={lic.verify_url} target="_blank" rel="noopener noreferrer" className="c-accent" style={{ fontFamily: 'var(--font-mono)', fontSize: '0.75rem' }}>Verify ↗</a>
+                            </span>
+                          )
                           : <span className="c-muted">—</span>}
                       </td>
                       <td>
@@ -329,8 +397,22 @@ function Licenses() {
                     <input className="form-input" type="text" value={formData.state_abbreviation || ''} readOnly style={{ opacity: 0.6, cursor: 'default' }} />
                   </div>
                   <div className="form-field">
-                    <label className="form-label">License #</label>
-                    <input className="form-input" type="text" placeholder="Optional" value={formData.license_number} onChange={e => setFormData(d => ({ ...d, license_number: e.target.value }))} />
+                    <label className="form-label">
+                      License #
+                      {addFormRequiresLicenseNum && <span style={{ color: '#ef4444', marginLeft: 3 }}>*</span>}
+                    </label>
+                    <input
+                      className="form-input"
+                      type="text"
+                      placeholder={addFormRequiresLicenseNum ? 'Required' : 'Optional'}
+                      value={formData.license_number}
+                      onChange={e => setFormData(d => ({ ...d, license_number: e.target.value }))}
+                    />
+                    {addFormRequiresLicenseNum && (
+                      <p style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: '0.25rem', fontFamily: 'var(--font-mono)' }}>
+                        License number required for consumer verification in this state
+                      </p>
+                    )}
                   </div>
                 </div>
                 <div style={{ marginTop: '0.75rem', display: 'flex', gap: '0.5rem' }}>

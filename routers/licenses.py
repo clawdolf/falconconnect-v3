@@ -9,18 +9,21 @@ Authenticated endpoints (Clerk):
   POST /api/licenses          — create license (auto-generates verify URL)
   PUT /api/licenses/{id}      — update license
   DELETE /api/licenses/{id}   — delete license
+  GET /api/licenses/health-check — verify URL health check
 """
 
 import asyncio
 import logging
 from typing import List, Optional
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.database import get_session
-from db.models import DBLicense
+from db.models import DBAgent, DBLicense
 from middleware.auth import require_auth
 from models.licenses import (
     License,
@@ -33,11 +36,41 @@ from constants_licenses import (
     get_state_verify_info as _get_state_verify_info,
     needs_manual_verification as _needs_manual_verification,
     ALL_STATES,
+    MANUAL_ENTRY_STATES,
 )
 
 logger = logging.getLogger("falconconnect.licenses")
 
 router = APIRouter()
+
+# States that require a license number for consumer manual-search verification
+REQUIRE_LICENSE_NUMBER_STATES = {"TX", "PA", "ME", "CA", "NY"}
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+async def _get_agent_npn(session: AsyncSession, user_id: str) -> str:
+    """Look up the agent's NPN from the agents table using their user_id."""
+    result = await session.execute(
+        select(DBAgent).where(DBAgent.user_id == user_id)
+    )
+    agent = result.scalar_one_or_none()
+    return (agent.npn or "") if agent else ""
+
+
+# ---------------------------------------------------------------------------
+# Health check models
+# ---------------------------------------------------------------------------
+
+class HealthCheckRequest(BaseModel):
+    urls: List[str]
+
+
+class UrlHealth(BaseModel):
+    url: str
+    ok: bool
 
 
 # ---------------------------------------------------------------------------
@@ -147,12 +180,33 @@ async def create_license(
     user_id = user.get("user_id") or user.get("sub") or "dev-mode"
     state = license_data.state_abbreviation.upper()
 
+    # --- Bug 4 fix: prevent duplicate state for same user ---
+    existing = await session.execute(
+        select(DBLicense).where(
+            DBLicense.user_id == user_id,
+            DBLicense.state_abbreviation == state,
+        )
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"You already have a license for {state}. Edit the existing one instead.",
+        )
+
+    # --- Feature 2: require license number for manual-verification states ---
+    if state in REQUIRE_LICENSE_NUMBER_STATES and not license_data.license_number:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"License number is required for {state}. Consumers need it to verify your license.",
+        )
+
     verify_url = license_data.verify_url
     manual = license_data.needs_manual_verification
 
     # Auto-generate verify URL if not provided
     if not verify_url:
-        npn = user.get("npn", "") or ""
+        # --- Bug 1 fix: look up NPN from agents table, not JWT ---
+        npn = await _get_agent_npn(session, user_id)
 
         if state == "FL":
             # FL requires a one-time web lookup to resolve the direct permalink
@@ -193,8 +247,6 @@ async def create_license(
         needs_manual_verification=manual,
         status=license_data.status,
         license_type=license_data.license_type,
-        issue_date=license_data.issue_date,
-        expiry_date=license_data.expiry_date,
     )
     session.add(new_license)
     # Flush to get the auto-generated ID before returning
@@ -229,6 +281,7 @@ async def update_license(
     """Authenticated: Update an existing license.
 
     Only the license owner can update their own licenses.
+    If state changes, verify_url and needs_manual_verification are regenerated.
     """
     user_id = user.get("user_id") or user.get("sub") or "dev-mode"
 
@@ -246,9 +299,43 @@ async def update_license(
             detail="License not found",
         )
 
+    old_state = license_obj.state_abbreviation
+
     update_data = license_data.model_dump(exclude_unset=True)
     for key, value in update_data.items():
         setattr(license_obj, key, value)
+
+    # --- Bug 3 fix: regenerate verify_url if state changed ---
+    new_state = license_obj.state_abbreviation
+    if new_state and new_state != old_state:
+        npn = await _get_agent_npn(session, user_id)
+        new_state_upper = new_state.upper()
+
+        if new_state_upper == "FL":
+            try:
+                from fl_license_lookup import lookup_fl_direct_url_safe
+                fl_url = await asyncio.to_thread(
+                    lookup_fl_direct_url_safe,
+                    fl_license_number=license_obj.license_number,
+                )
+                from constants_licenses import FL_DFS_SEARCH_URL
+                license_obj.verify_url = fl_url or FL_DFS_SEARCH_URL
+                license_obj.needs_manual_verification = not bool(fl_url)
+            except Exception as e:
+                logger.warning("FL license lookup failed on edit: %s", e)
+                from constants_licenses import FL_DFS_SEARCH_URL
+                license_obj.verify_url = FL_DFS_SEARCH_URL
+                license_obj.needs_manual_verification = True
+        else:
+            license_obj.verify_url = (
+                _get_verify_url(
+                    new_state_upper,
+                    npn=npn,
+                    license_number=license_obj.license_number,
+                )
+                or ""
+            )
+            license_obj.needs_manual_verification = _needs_manual_verification(new_state_upper)
 
     logger.info("License updated: id=%d user=%s", license_id, user_id)
 
@@ -294,3 +381,33 @@ async def delete_license(
     logger.info("License deleted: id=%d user=%s", license_id, user_id)
 
     return {"message": "License deleted successfully"}
+
+
+# ---------------------------------------------------------------------------
+# Health check endpoint (Feature 1)
+# ---------------------------------------------------------------------------
+
+@router.post("/health-check", response_model=List[UrlHealth])
+async def health_check_verify_urls(
+    payload: HealthCheckRequest,
+    user=Depends(require_auth),
+):
+    """Authenticated: Check if verify URLs are reachable.
+
+    Does HEAD requests to each URL and returns ok/not-ok status.
+    Used by the frontend to show green/red dots next to Verify links.
+    """
+    async def check_url(url: str) -> UrlHealth:
+        try:
+            async with httpx.AsyncClient(
+                timeout=10,
+                follow_redirects=True,
+                verify=False,
+            ) as client:
+                resp = await client.head(url)
+                return UrlHealth(url=url, ok=resp.status_code < 400)
+        except Exception:
+            return UrlHealth(url=url, ok=False)
+
+    results = await asyncio.gather(*[check_url(u) for u in payload.urls])
+    return list(results)

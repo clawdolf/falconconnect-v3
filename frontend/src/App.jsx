@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react'
-import { ClerkProvider, SignedIn, SignedOut, UserButton, useSignIn } from '@clerk/clerk-react'
+import { useState, useEffect, useRef } from 'react'
+import { ClerkProvider, SignedIn, SignedOut, useSignIn, useUser, useClerk } from '@clerk/clerk-react'
 import Dashboard from './components/Dashboard'
 import LeadImport from './components/LeadImport'
 import Licenses from './components/Licenses'
+import Team from './components/Team'
 import SyncManagement from './components/SyncManagement'
 import Analytics from './components/Analytics'
 
@@ -13,6 +14,7 @@ const NAV_ITEMS = [
   { key: 'dashboard', label: 'Dashboard' },
   { key: 'leads', label: 'Lead Import' },
   { key: 'licenses', label: 'Licenses' },
+  { key: 'team', label: 'Team' },
   { key: 'sync', label: 'Sync' },
   { key: 'analytics', label: 'Analytics' },
 ]
@@ -23,6 +25,8 @@ function PageContent({ currentPage }) {
       return <LeadImport />
     case 'licenses':
       return <Licenses />
+    case 'team':
+      return <Team />
     case 'sync':
       return <SyncManagement />
     case 'analytics':
@@ -216,6 +220,121 @@ function CustomSignIn() {
   )
 }
 
+/* ── Custom User Menu (no Clerk branding) ── */
+function UserMenu() {
+  const { user } = useUser()
+  const { signOut } = useClerk()
+  const [open, setOpen] = useState(false)
+  const menuRef = useRef(null)
+
+  // Close on outside click
+  useEffect(() => {
+    function handleOutsideClick(e) {
+      if (menuRef.current && !menuRef.current.contains(e.target)) {
+        setOpen(false)
+      }
+    }
+    if (open) document.addEventListener('mousedown', handleOutsideClick)
+    return () => document.removeEventListener('mousedown', handleOutsideClick)
+  }, [open])
+
+  // Derive initials or fallback
+  const name = user?.fullName || user?.firstName || 'Seb'
+  const email = user?.primaryEmailAddress?.emailAddress || ''
+  const imageUrl = user?.imageUrl || null
+  const initials = name
+    .split(' ')
+    .map((w) => w[0])
+    .join('')
+    .toUpperCase()
+    .slice(0, 2) || 'S'
+
+  return (
+    <div ref={menuRef} style={{ position: 'relative', display: 'inline-block' }}>
+      {/* Avatar trigger */}
+      <button
+        onClick={() => setOpen((o) => !o)}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          width: 28,
+          height: 28,
+          borderRadius: '50%',
+          border: '1px solid var(--border)',
+          background: imageUrl ? 'transparent' : 'var(--surface-hover)',
+          cursor: 'pointer',
+          padding: 0,
+          overflow: 'hidden',
+          flexShrink: 0,
+        }}
+        aria-label="User menu"
+      >
+        {imageUrl ? (
+          <img src={imageUrl} alt={name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+        ) : (
+          <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.6rem', fontWeight: 600, color: 'var(--accent)', letterSpacing: 0.5 }}>
+            {initials}
+          </span>
+        )}
+      </button>
+
+      {/* Dropdown */}
+      {open && (
+        <div
+          style={{
+            position: 'absolute',
+            bottom: '36px',
+            left: 0,
+            minWidth: 200,
+            background: 'var(--surface)',
+            border: '1px solid var(--border)',
+            borderRadius: 4,
+            boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
+            zIndex: 1000,
+            padding: '0.75rem',
+          }}
+        >
+          {/* User info */}
+          <div style={{ marginBottom: '0.5rem' }}>
+            <p style={{ fontFamily: 'var(--font-mono)', fontSize: '0.72rem', fontWeight: 600, color: 'var(--text)', margin: 0 }}>
+              {name}
+            </p>
+            {email && (
+              <p style={{ fontFamily: 'var(--font-mono)', fontSize: '0.62rem', color: 'var(--text-muted)', margin: '0.15rem 0 0' }}>
+                {email}
+              </p>
+            )}
+          </div>
+
+          <hr style={{ border: 'none', borderTop: '1px solid var(--border)', margin: '0.5rem 0' }} />
+
+          {/* Sign out */}
+          <button
+            onClick={() => signOut()}
+            style={{
+              width: '100%',
+              textAlign: 'left',
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              fontFamily: 'var(--font-mono)',
+              fontSize: '0.72rem',
+              color: 'var(--text-muted)',
+              padding: '0.25rem 0',
+              letterSpacing: '0.05em',
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text)' }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-muted)' }}
+          >
+            Sign out
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 /* ── App Layout ── */
 function AppLayout() {
   const [currentPage, setCurrentPage] = useState('dashboard')
@@ -271,7 +390,7 @@ function AppLayout() {
 
         {!DEV_BYPASS && PUBLISHABLE_KEY && (
           <div className="sidebar-footer">
-            <UserButton appearance={{ elements: { avatarBox: { width: 28, height: 28 } } }} />
+            <UserMenu />
           </div>
         )}
       </aside>

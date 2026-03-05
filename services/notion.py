@@ -189,6 +189,10 @@ def _build_properties(
     if lage_label:
         props["LAge"] = {"select": {"name": lage_label}}
 
+    # Lead Type (select) — BUG 3 FIX: was never written to Notion
+    if lead.get("lead_type"):
+        props["Lead Type"] = {"select": {"name": lead["lead_type"]}}
+
     # Lead Source (select)
     lead_source = lead.get("lead_source") or lead.get("source")
     if lead_source:
@@ -201,14 +205,15 @@ def _build_properties(
             mail_date = mail_date.isoformat()
         props["Mortgage Sale Date"] = {"date": {"start": str(mail_date)}}
 
-    # Notes → append to Aggregate Comments
+    # BUG 4 FIX: Always write GHL ID first, append notes after.
+    # Format: "GHL:{id} | {notes}" — never overwrite the GHL ID portion.
     notes = lead.get("notes", "")
     if notes:
-        # Prepend GHL ID, then notes
-        comment_text = f"GHL:{ghl_contact_id} | {notes}"
+        comment_text = f"GHL:{ghl_contact_id} | {notes}" if ghl_contact_id else notes
         props["Aggregate Comments"] = {
             "rich_text": [{"text": {"content": comment_text[:2000]}}]
         }
+    # If no notes, the default "GHL:{id}" set above is preserved
 
     return props
 

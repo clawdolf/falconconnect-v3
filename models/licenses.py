@@ -1,6 +1,5 @@
 """Pydantic models for license endpoints."""
 
-from datetime import date, datetime
 from enum import Enum
 from typing import Optional
 
@@ -40,8 +39,6 @@ class LicenseCreate(BaseModel):
     verify_url: Optional[str] = None
     needs_manual_verification: bool = False
     status: str = "active"
-    issue_date: Optional[date] = None
-    expiry_date: Optional[date] = None
     license_type: str = "insurance_producer"
 
 
@@ -54,8 +51,6 @@ class LicenseUpdate(BaseModel):
     verify_url: Optional[str] = None
     needs_manual_verification: Optional[bool] = None
     status: Optional[str] = None
-    issue_date: Optional[date] = None
-    expiry_date: Optional[date] = None
     license_type: Optional[str] = None
 
 

@@ -14,7 +14,7 @@ down_revision = "004_reseed_licenses"
 branch_labels = None
 depends_on = None
 
-SEB_UID = "72dc5b7c-ba2c-4a1d-83b9-733ff600c0d5"
+SEB_UID = "user_3ASrwDOrSTaDxCus6f1B5lnDsgz"
 
 
 def upgrade() -> None:
