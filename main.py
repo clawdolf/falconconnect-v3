@@ -216,6 +216,22 @@ async def seed_licenses_now():
     return {"ok": True, "inserted": inserted, "skipped": skipped}
 
 
+@app.get("/debug/agent-user-ids")
+async def debug_agent_user_ids():
+    """Temporary: show agents.user_id vs licenses.user_id to diagnose mismatch."""
+    from sqlalchemy import text
+    from db.database import _get_session_factory as _sf
+    async with _sf()() as session:
+        agents_result = await session.execute(text("SELECT slug, user_id FROM agents LIMIT 5"))
+        agents_rows = agents_result.fetchall()
+        lic_result = await session.execute(text("SELECT DISTINCT user_id, COUNT(*) as cnt FROM licenses GROUP BY user_id"))
+        lic_rows = lic_result.fetchall()
+    return {
+        "agents": [{"slug": r[0], "user_id": r[1]} for r in agents_rows],
+        "license_user_ids": [{"user_id": r[0], "count": r[1]} for r in lic_rows],
+    }
+
+
 @app.get("/debug/env")
 async def debug_env():
     """Temporary debug endpoint — checks raw env vars. Remove after verifying Clerk."""
