@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { ClerkProvider, SignedIn, SignedOut, useSignIn, useUser, useClerk, AuthenticateWithRedirectCallback } from '@clerk/clerk-react'
+import { ClerkProvider, SignedIn, SignedOut, useSignIn, useUser, useClerk, AuthenticateWithRedirectCallback, UserProfile } from '@clerk/clerk-react'
 import Dashboard from './components/Dashboard'
 import LeadImport from './components/LeadImport'
 import Licenses from './components/Licenses'
@@ -276,6 +276,7 @@ function UserMenu() {
   const { user } = useUser()
   const { signOut } = useClerk()
   const [open, setOpen] = useState(false)
+  const [showProfile, setShowProfile] = useState(false)
   const menuRef = useRef(null)
 
   const hasApple = user?.externalAccounts?.some(a => a.provider === 'apple')
@@ -375,6 +376,30 @@ function UserMenu() {
 
           <hr style={{ border: 'none', borderTop: '1px solid var(--border)', margin: '0.5rem 0' }} />
 
+          {/* Manage account */}
+          <button
+            onClick={() => { setOpen(false); setShowProfile(true) }}
+            style={{
+              width: '100%',
+              textAlign: 'left',
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              fontFamily: 'var(--font-mono)',
+              fontSize: '0.72rem',
+              color: 'var(--text-muted)',
+              padding: '0.25rem 0',
+              letterSpacing: '0.05em',
+              touchAction: 'manipulation',
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text)' }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-muted)' }}
+          >
+            Manage account
+          </button>
+
+          <hr style={{ border: 'none', borderTop: '1px solid var(--border)', margin: '0.5rem 0' }} />
+
           {/* Connect Apple (if not yet linked) */}
           {!hasApple && (
             <button
@@ -432,6 +457,45 @@ function UserMenu() {
           >
             Sign out
           </button>
+        </div>
+      )}
+
+      {/* Clerk UserProfile modal */}
+      {showProfile && (
+        <div
+          onClick={(e) => { if (e.target === e.currentTarget) setShowProfile(false) }}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.7)',
+            zIndex: 9999,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '1rem',
+          }}
+        >
+          <div style={{ position: 'relative', maxWidth: '100%', maxHeight: '90vh', overflow: 'auto' }}>
+            <button
+              onClick={() => setShowProfile(false)}
+              style={{
+                position: 'absolute',
+                top: 8,
+                right: 8,
+                zIndex: 1,
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                color: 'var(--text-muted)',
+                fontFamily: 'var(--font-mono)',
+                fontSize: '0.72rem',
+                touchAction: 'manipulation',
+              }}
+            >
+              ✕
+            </button>
+            <UserProfile />
+          </div>
         </div>
       )}
     </div>
