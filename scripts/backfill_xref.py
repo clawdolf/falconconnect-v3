@@ -303,27 +303,45 @@ async def main(dry_run: bool = False, output_path: Optional[str] = None):
             skipped_existing += 1
             continue
 
-        # Get primary phone from GHL contact
+        # Bug 3 fix: Try ALL phone fields on the GHL contact for matching
+        phones_to_try = []
+
+        # Primary phone
         raw_phone = contact.get("phone", "")
-        if not raw_phone:
+        if raw_phone:
+            phone_e164 = normalize_phone(raw_phone)
+            if phone_e164:
+                phones_to_try.append(phone_e164)
+
+        # Additional phones (GHL stores these as a list)
+        additional = contact.get("additionalPhones", []) or []
+        for ap in additional:
+            ap_phone = ap.get("phoneNumber", "") or ap.get("phone", "")
+            if ap_phone:
+                ap_e164 = normalize_phone(ap_phone)
+                if ap_e164 and ap_e164 not in phones_to_try:
+                    phones_to_try.append(ap_e164)
+
+        if not phones_to_try:
             skipped_no_phone += 1
             continue
 
-        phone_e164 = normalize_phone(raw_phone)
-        if not phone_e164:
-            skipped_no_phone += 1
-            continue
+        # Try each phone for a match
+        notion_page_id = None
+        matched_phone = None
+        for phone_e164 in phones_to_try:
+            if phone_e164 in existing_phones:
+                continue
+            notion_page_id = notion_phone_map.get(phone_e164)
+            if notion_page_id:
+                matched_phone = phone_e164
+                break
 
-        # Skip if this phone is already mapped
-        if phone_e164 in existing_phones:
-            skipped_existing += 1
-            continue
-
-        # Dict lookup — O(1), no API call
-        notion_page_id = notion_phone_map.get(phone_e164)
         if not notion_page_id:
             not_found += 1
             continue
+
+        phone_e164 = matched_phone
 
         first_name = contact.get("firstName", "")
         last_name = contact.get("lastName", "")
