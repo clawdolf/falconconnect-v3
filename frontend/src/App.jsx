@@ -267,6 +267,7 @@ function UserMenu() {
           padding: 0,
           overflow: 'hidden',
           flexShrink: 0,
+          touchAction: 'manipulation',
         }}
         aria-label="User menu"
       >
@@ -284,9 +285,10 @@ function UserMenu() {
         <div
           style={{
             position: 'absolute',
-            bottom: '36px',
-            left: 0,
+            top: '36px',
+            right: 0,
             minWidth: 200,
+            maxWidth: 'calc(100vw - 2rem)',
             background: 'var(--surface)',
             border: '1px solid var(--border)',
             borderRadius: 4,
