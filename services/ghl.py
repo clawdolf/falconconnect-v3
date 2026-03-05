@@ -46,34 +46,35 @@ STATE_TIMEZONES = {
 
 # ── GHL custom field IDs (verified 2026-03-04) ──
 
-# ── ZIP code → timezone lookup (pgeocode + timezonefinder, falls back to state) ──
+# ── ZIP code → timezone lookup (static CSV, falls back to state) ──
 
-try:
-    import pgeocode
-    import pandas as pd
-    from timezonefinder import TimezoneFinder
-    _nomi = pgeocode.Nominatim('us')
-    _tf = TimezoneFinder()
+def _load_zip_timezones() -> Dict[str, str]:
+    """Load ZIP→timezone map from bundled CSV. Returns empty dict on failure."""
+    import csv
+    from pathlib import Path
+    csv_path = Path(__file__).resolve().parent.parent / "data" / "zip_timezones.csv"
+    if not csv_path.exists():
+        logger.warning("zip_timezones.csv not found at %s — using state-only TZ", csv_path)
+        return {}
+    result: Dict[str, str] = {}
+    with open(csv_path, newline="") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            result[row["zip"]] = row["tz"]
+    logger.info("Loaded %d ZIP→timezone mappings", len(result))
+    return result
 
-    def get_timezone(zip_code: str, state: str) -> Optional[str]:
-        """Look up timezone by ZIP code (lat/lon → tz), fall back to state."""
-        if zip_code:
-            try:
-                result = _nomi.query_postal_code(zip_code.strip()[:5])
-                lat = result.get('latitude') if hasattr(result, 'get') else getattr(result, 'latitude', None)
-                lon = result.get('longitude') if hasattr(result, 'get') else getattr(result, 'longitude', None)
-                if lat is not None and lon is not None and not pd.isna(lat) and not pd.isna(lon):
-                    tz = _tf.timezone_at(lat=float(lat), lng=float(lon))
-                    if tz:
-                        return tz
-            except Exception:
-                pass
-        # Fallback to state
-        return STATE_TIMEZONES.get((state or '').strip().upper())
-except ImportError:
-    def get_timezone(zip_code: str, state: str) -> Optional[str]:
-        """Fallback: state-only timezone lookup (pgeocode/timezonefinder not installed)."""
-        return STATE_TIMEZONES.get((state or '').strip().upper())
+_ZIP_TIMEZONES: Dict[str, str] = _load_zip_timezones()
+
+
+def get_timezone(zip_code: str, state: str) -> Optional[str]:
+    """Look up timezone by ZIP code first, fall back to state."""
+    if zip_code:
+        clean_zip = zip_code.strip()[:5]
+        tz = _ZIP_TIMEZONES.get(clean_zip)
+        if tz:
+            return tz
+    return STATE_TIMEZONES.get((state or '').strip().upper())
 
 GHL_CF_LENDER = "ZCmpWQ9KOdacOV2VZ4pn"
 GHL_CF_LOAN_AMOUNT = "haycapFYMCnJEFovornG"
