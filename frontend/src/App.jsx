@@ -358,7 +358,7 @@ function UserMenu() {
             border: '1px solid var(--border)',
             borderRadius: 4,
             boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
-            zIndex: 1000,
+            zIndex: 9000,
             padding: '0.75rem',
           }}
         >
@@ -376,7 +376,7 @@ function UserMenu() {
 
           <hr style={{ border: 'none', borderTop: '1px solid var(--border)', margin: '0.5rem 0' }} />
 
-          {/* Manage account */}
+          {/* Manage account — first action, always visible */}
           <button
             onClick={() => { setOpen(false); setShowProfile(true) }}
             style={{
@@ -396,6 +396,28 @@ function UserMenu() {
             onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-muted)' }}
           >
             Manage account
+          </button>
+
+          {/* Sign out — second action, right after manage account */}
+          <button
+            onClick={() => signOut()}
+            style={{
+              width: '100%',
+              textAlign: 'left',
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              fontFamily: 'var(--font-mono)',
+              fontSize: '0.72rem',
+              color: 'var(--text-muted)',
+              padding: '0.25rem 0',
+              letterSpacing: '0.05em',
+              touchAction: 'manipulation',
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text)' }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-muted)' }}
+          >
+            Sign out
           </button>
 
           <hr style={{ border: 'none', borderTop: '1px solid var(--border)', margin: '0.5rem 0' }} />
@@ -435,28 +457,6 @@ function UserMenu() {
             </p>
           )}
 
-          <hr style={{ border: 'none', borderTop: '1px solid var(--border)', margin: '0.5rem 0' }} />
-
-          {/* Sign out */}
-          <button
-            onClick={() => signOut()}
-            style={{
-              width: '100%',
-              textAlign: 'left',
-              background: 'none',
-              border: 'none',
-              cursor: 'pointer',
-              fontFamily: 'var(--font-mono)',
-              fontSize: '0.72rem',
-              color: 'var(--text-muted)',
-              padding: '0.25rem 0',
-              letterSpacing: '0.05em',
-            }}
-            onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text)' }}
-            onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-muted)' }}
-          >
-            Sign out
-          </button>
         </div>
       )}
 
