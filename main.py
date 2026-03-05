@@ -192,7 +192,8 @@ async def debug_env():
 
 
 # API routers
-app.include_router(leads.router, prefix="/api/public", tags=["Leads"])
+# BUG 11 FIX: Leads moved from /api/public to /api (requires Clerk auth)
+app.include_router(leads.router, prefix="/api", tags=["Leads"])
 app.include_router(webhooks.router, prefix="/api/webhooks", tags=["Webhooks"])
 app.include_router(calendar.router, prefix="/api/calendar", tags=["Calendar"])
 app.include_router(analytics.router, prefix="/api/analytics", tags=["Analytics"])
