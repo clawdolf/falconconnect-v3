@@ -285,10 +285,12 @@ function UserMenu() {
     try {
       await user.createExternalAccount({
         strategy: 'oauth_apple',
-        redirectUrl: '/sso-callback',
+        redirectUrl: `${window.location.origin}/sso-callback`,
+        additionalScopes: ['email', 'name'],
       })
     } catch (err) {
       console.error('Apple connect failed', err)
+      alert('Apple connection failed. Try signing out and signing back in with Apple.')
     }
   }
 
