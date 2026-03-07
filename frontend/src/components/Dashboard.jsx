@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import CalendarLinks from './CalendarLinks'
 import DryRunReport from './DryRunReport'
+import QuickAddLead from './QuickAddLead'
 
 function Dashboard() {
   const [health, setHealth] = useState(null)
@@ -32,7 +33,10 @@ function Dashboard() {
     <div className="dashboard">
       {/* Service Health */}
       <section className="section">
-        <h2 className="section-title">Service Status</h2>
+        <h2 className="section-title" style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+          Service Status
+          <QuickAddLead />
+        </h2>
         {loading ? (
           <p className="loading-text">Loading...</p>
         ) : health ? (
