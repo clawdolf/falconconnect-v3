@@ -8,12 +8,13 @@ from sqlalchemy import (
     DateTime,
     Date,
     Float,
+    ForeignKey,
     Integer,
     String,
     Text,
     func,
 )
-from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.orm import DeclarativeBase, relationship
 
 
 class Base(DeclarativeBase):
@@ -156,3 +157,51 @@ class DBLicense(Base):
     updated_at: datetime = Column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+class Campaign(Base):
+    """Ad campaigns — tracks Meta Ads campaigns for lead generation."""
+
+    __tablename__ = "campaigns"
+
+    id: int = Column(Integer, primary_key=True, autoincrement=True)
+    user_id: str = Column(String(128), nullable=False, index=True)
+    name: str = Column(String(256), nullable=False)
+    status: str = Column(String(32), default="draft", index=True)  # draft | active | paused | completed
+    strategy_json: str = Column(Text, nullable=True)  # JSON — product, target states, age range, etc.
+    meta_campaign_id: str = Column(String(128), nullable=True)
+    meta_ad_account_id: str = Column(String(128), nullable=True)
+    budget_daily: float = Column(Float, default=0.0)
+    budget_total: float = Column(Float, default=0.0)
+    target_audience_json: str = Column(Text, nullable=True)  # JSON — audience targeting config
+    created_at: datetime = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at: datetime = Column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    variants = relationship("CampaignVariant", back_populates="campaign", lazy="selectin")
+
+
+class CampaignVariant(Base):
+    """Ad copy variants within a campaign — A/B test different angles."""
+
+    __tablename__ = "campaign_variants"
+
+    id: int = Column(Integer, primary_key=True, autoincrement=True)
+    campaign_id: int = Column(Integer, ForeignKey("campaigns.id"), nullable=False, index=True)
+    variant_name: str = Column(String(256), nullable=False)
+    headline: str = Column(String(512), nullable=False)
+    body_copy: str = Column(Text, nullable=False)
+    cta_text: str = Column(String(128), nullable=False)
+    angle: str = Column(String(32), nullable=False)  # fear | math | social_proof | urgency
+    meta_ad_id: str = Column(String(128), nullable=True)
+    impressions: int = Column(Integer, default=0)
+    clicks: int = Column(Integer, default=0)
+    leads: int = Column(Integer, default=0)
+    booked_appointments: int = Column(Integer, default=0)
+    spend: float = Column(Float, default=0.0)
+    cpl: float = Column(Float, default=0.0)
+    status: str = Column(String(32), default="active")  # active | paused | killed
+    created_at: datetime = Column(DateTime(timezone=True), server_default=func.now())
+
+    campaign = relationship("Campaign", back_populates="variants")

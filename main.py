@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from db.database import init_db
-from routers import leads, webhooks, calendar, analytics, admin, sync, licenses, agents
+from routers import leads, webhooks, calendar, analytics, admin, sync, licenses, agents, campaigns
 from routers.sheets import router as sheets_router
 from services.notion_ghl_sync import sync_loop
 
@@ -285,6 +285,7 @@ app.include_router(sync.router, prefix="/api/sync", tags=["Sync"])
 app.include_router(licenses.router, prefix="/api/licenses", tags=["Licenses"])
 app.include_router(agents.router, prefix="/api/public", tags=["Agents"])
 app.include_router(sheets_router, prefix="/api/sheets", tags=["Sheets"])
+app.include_router(campaigns.router, prefix="/api/campaigns", tags=["Campaigns"])
 
 # Serve React frontend (built files) — must be LAST so API routes take priority
 frontend_dist = os.path.join(os.path.dirname(__file__), "frontend", "dist")

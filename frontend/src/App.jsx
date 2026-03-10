@@ -6,6 +6,7 @@ import Licenses from './components/Licenses'
 import Team from './components/Team'
 import SyncManagement from './components/SyncManagement'
 import Analytics from './components/Analytics'
+import Campaigns from './components/Campaigns'
 
 const PUBLISHABLE_KEY = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY
 const DEV_BYPASS = import.meta.env.VITE_DEV_BYPASS === 'true'
@@ -17,6 +18,7 @@ const NAV_ITEMS = [
   { key: 'team', label: 'Team' },
   { key: 'sync', label: 'Sync' },
   { key: 'analytics', label: 'Analytics' },
+  { key: 'campaigns', label: 'Campaigns' },
 ]
 
 function PageContent({ currentPage }) {
@@ -31,6 +33,8 @@ function PageContent({ currentPage }) {
       return <SyncManagement />
     case 'analytics':
       return <Analytics />
+    case 'campaigns':
+      return <Campaigns />
     default:
       return <Dashboard />
   }
