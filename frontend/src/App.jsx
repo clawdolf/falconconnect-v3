@@ -573,6 +573,10 @@ function AppLayout() {
         {/* Wordmark — desktop */}
         <div className="sidebar-wordmark-wrap">
           <div className="sidebar-wordmark">FALCON<br />CONNECT</div>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.6rem', color: 'var(--text-muted)', letterSpacing: '0.04em', marginTop: '0.2rem', lineHeight: 1.3 }}>
+            v{__APP_VERSION__}<br />
+            <span style={{ opacity: 0.6 }}>{__BUILD_DATE__}</span>
+          </div>
         </div>
 
         {/* Desktop nav — always visible */}
