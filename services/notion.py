@@ -11,6 +11,7 @@ Property names match the actual Notion Leads DB schema (verified 2026-03-03):
 """
 
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
@@ -196,7 +197,6 @@ def _build_properties(
             comment_text = existing_comments
         elif ghl_contact_id and "GHL:" in existing_comments:
             # Different GHL ID exists — update the ID portion but keep notes
-            import re
             comment_text = re.sub(r"GHL:[^\s|]+", f"GHL:{ghl_contact_id}", existing_comments, count=1)
         elif ghl_contact_id:
             # No GHL ID yet — prepend it
@@ -244,7 +244,11 @@ def _build_properties(
     if lead.get("city"):
         props["City"] = {"rich_text": [{"text": {"content": lead["city"]}}]}
     if lead.get("zip_code"):
-        props["ZIP Code"] = {"rich_text": [{"text": {"content": lead["zip_code"]}}]}
+        # Normalize ZIP: extract first 5 digits, left-pad with zeros if short (Maine etc.)
+        _zip_digits = re.sub(r"\D", "", str(lead["zip_code"]))[:5]
+        _zip_norm = _zip_digits.zfill(5) if 1 <= len(_zip_digits) <= 5 else _zip_digits
+        if _zip_norm:
+            props["ZIP Code"] = {"rich_text": [{"text": {"content": _zip_norm}}]}
 
     # State (select) — normalize full names to 2-letter codes (matches old import script)
     if lead.get("state"):
@@ -286,12 +290,12 @@ def _build_properties(
     if lead_source:
         props["Lead Source"] = {"select": {"name": lead_source}}
 
-    # Mortgage Sale Date (date) — the original mail date
+    # Mortgage Sale Date (date) — normalize to YYYY-MM-DD (same as DOB/LPD)
     mail_date = lead.get("mail_date")
     if mail_date:
-        if hasattr(mail_date, "isoformat"):
-            mail_date = mail_date.isoformat()
-        props["Mortgage Sale Date"] = {"date": {"start": str(mail_date)}}
+        mail_date_parsed = _parse_date_flexible(mail_date)
+        if mail_date_parsed:
+            props["Mortgage Sale Date"] = {"date": {"start": mail_date_parsed}}
 
     # BUG 4 FIX: Always write GHL ID first, append notes after.
     # Format: "GHL:{id} | {notes}" — never overwrite the GHL ID portion.
