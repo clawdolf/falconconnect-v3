@@ -182,6 +182,10 @@ export function buildLeads(rows, headers, columnMap, vendor, tier, leadType, lea
       delete lead.full_name
     }
 
+    // Phone fallback: if phone not mapped directly, promote mobile_phone or home_phone
+    if (!lead.phone && lead.mobile_phone) lead.phone = lead.mobile_phone
+    if (!lead.phone && lead.home_phone) lead.phone = lead.home_phone
+
     // BUG 12: Track dropped rows instead of silently skipping
     if (!lead.first_name || !lead.last_name || !lead.phone) {
       droppedCount++

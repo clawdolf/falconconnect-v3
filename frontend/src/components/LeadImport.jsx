@@ -126,7 +126,14 @@ function LeadImport() {
     finally { setSheetLoading(false) }
   }
 
-  const mappingOk = ['first_name', 'last_name', 'phone'].every(f => Object.values(columnMap).includes(f))
+  // mappingOk: need at least one phone field AND at least name coverage
+  // Phone: accepts phone, mobile_phone, or home_phone
+  // Name: accepts (first_name + last_name) OR full_name
+  const _mappedVals = Object.values(columnMap)
+  const mappingOk = (
+    (_mappedVals.includes('phone') || _mappedVals.includes('mobile_phone') || _mappedVals.includes('home_phone')) &&
+    ((_mappedVals.includes('first_name') && _mappedVals.includes('last_name')) || _mappedVals.includes('full_name'))
+  )
 
   // BUG 11 FIX: Use authenticated endpoint /api/leads/bulk instead of /api/public/leads/bulk
   const doImport = async () => {
