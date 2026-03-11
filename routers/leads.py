@@ -37,7 +37,7 @@ class BulkLeadItem(BaseModel):
     email: Optional[str] = Field(None, max_length=256)
     address: Optional[str] = Field(None, max_length=512)
     city: Optional[str] = Field(None, max_length=128)
-    state: Optional[str] = Field(None, max_length=2)
+    state: Optional[str] = Field(None, max_length=64)  # Full names allowed — backend normalizes to 2-letter
     zip_code: Optional[str] = Field(None, max_length=10)
     # BUG 8 FIX: Dynamic max year instead of hardcoded 2026
     birth_year: Optional[int] = Field(None, ge=1900)
