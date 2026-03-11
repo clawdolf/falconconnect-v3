@@ -67,49 +67,84 @@ export const LEAD_FIELDS = [
 ]
 
 export const COLUMN_ALIASES = {
-  // Full name (split into first/last in buildLeads)
+  // ── Names ──
   'full name': 'full_name', 'fullname': 'full_name', 'name': 'full_name',
   'borrowername': 'full_name', 'clientname': 'full_name', 'applicantname': 'full_name',
   'primaryname': 'full_name',
   'first name': 'first_name', 'firstname': 'first_name', 'fname': 'first_name',
+  'first': 'first_name', 'borrowerfirstname': 'first_name', 'applicantfirstname': 'first_name',
+  'clientfirstname': 'first_name', 'primaryfirstname': 'first_name',
   'last name': 'last_name', 'lastname': 'last_name', 'lname': 'last_name',
-  'phone': 'phone', 'cell': 'phone', 'cell phone': 'phone', 'mobile': 'phone', 'mobile phone': 'phone',
-  'home phone': 'home_phone', 'home_phone': 'home_phone', 'homephone': 'home_phone', 'hphone': 'home_phone',
-  'mobile phone': 'mobile_phone', 'mobile_phone': 'mobile_phone', 'mobilephone': 'mobile_phone',
-  'spouse phone': 'spouse_phone', 'spouse_phone': 'spouse_phone', 'spousephone': 'spouse_phone', 'spouse cell': 'spouse_phone',
-  'email': 'email', 'e-mail': 'email',
+  'last': 'last_name', 'borrowerlastname': 'last_name', 'applicantlastname': 'last_name',
+  'clientlastname': 'last_name', 'primarylastname': 'last_name',
+
+  // ── Phone — primary (maps to `phone` which backend requires) ──
+  // Any of these becomes the main phone field
+  'phone': 'phone', 'phone1': 'phone', 'primaryphone': 'phone',
+  'cell': 'phone', 'cell phone': 'phone', 'cellphone': 'phone',
+  'mobile': 'phone', 'mphone': 'phone',
+  // NOTE: 'mobile phone' and 'mobilephone' intentionally map to `phone` (primary),
+  // NOT mobile_phone, because most vendor files label their only phone as "Mobile Phone"
+  'mobile phone': 'phone', 'mobilephone': 'phone', 'mobile_phone': 'phone',
+
+  // ── Phone — secondary ──
+  'home phone': 'home_phone', 'home_phone': 'home_phone', 'homephone': 'home_phone',
+  'landline': 'home_phone', 'recentlandline1': 'home_phone',
+  'phone2': 'home_phone', 'secondaryphone': 'home_phone', 'hphone': 'home_phone',
+  'spouse phone': 'spouse_phone', 'spouse_phone': 'spouse_phone',
+  'spousephone': 'spouse_phone', 'spouse cell': 'spouse_phone',
+
+  // ── Email ──
+  'email': 'email', 'e-mail': 'email', 'emailaddress': 'email',
+
+  // ── Address ──
   'address': 'address', 'street': 'address', 'street address': 'address',
-  'city': 'city', 'state': 'state', 'st': 'state',
-  'zip': 'zip_code', 'zip_code': 'zip_code', 'zipcode': 'zip_code', 'zip code': 'zip_code', 'postal': 'zip_code',
-  'birth year': 'birth_year', 'birth_year': 'birth_year', 'birthyear': 'birth_year',
-  // NOTE: 'dob' maps to full DOB date field (not birth_year) — see aliases below
-  'source': 'lead_source', 'lead source': 'lead_source', 'lead_source': 'lead_source', 'vendor': 'lead_source',
-  'type': 'lead_type', 'lead type': 'lead_type', 'lead_type': 'lead_type',
-  'lead age': 'lead_age_bucket', 'lead_age': 'lead_age_bucket', 'lead_age_bucket': 'lead_age_bucket',
-  'lender': 'lender', 'mortgage company': 'lender',
-  'loan amount': 'loan_amount', 'loan_amount': 'loan_amount', 'loanamount': 'loan_amount',
-  'mail date': 'mail_date', 'mail_date': 'mail_date', 'maildate': 'mail_date',
-  'notes': 'notes', 'note': 'notes',
-  // Best Time to Call / Comments → dedicated field (not notes)
-  'best time to call': 'best_time_to_call', 'besttimetocall': 'best_time_to_call',
-  'comment': 'best_time_to_call', 'comments': 'best_time_to_call',
-  // DOB (full date — separate from birth_year)
+  'streetaddress': 'address', 'addr': 'address',
+  'city': 'city', 'town': 'city',
+  'state': 'state', 'st': 'state',
+  'zip': 'zip_code', 'zip_code': 'zip_code', 'zipcode': 'zip_code',
+  'zip code': 'zip_code', 'zip_plus_four': 'zip_code', 'postal': 'zip_code',
+  'postalcode': 'zip_code',
+
+  // ── DOB / Age ──
   'dob': 'dob', 'date of birth': 'dob', 'dateofbirth': 'dob',
-  'birthdate': 'dob', 'birth_date': 'dob',
-  // LPD — Lead Purchase Date
+  'birthdate': 'dob', 'birth_date': 'dob', 'birth date': 'dob',
+  'birth year': 'birth_year', 'birth_year': 'birth_year', 'birthyear': 'birth_year',
+  'age': 'birth_year', 'borrowerage': 'birth_year',
+
+  // ── Lead metadata ──
+  'source': 'lead_source', 'lead source': 'lead_source', 'lead_source': 'lead_source',
+  'vendor': 'lead_source',
+  'type': 'lead_type', 'lead type': 'lead_type', 'lead_type': 'lead_type',
+  'lead age': 'lead_age_bucket', 'lead_age': 'lead_age_bucket',
+  'lead_age_bucket': 'lead_age_bucket',
+
+  // ── Money / Lender ──
+  'lender': 'lender', 'mortgage company': 'lender', 'bank': 'lender', 'servicer': 'lender',
+  'loan amount': 'loan_amount', 'loan_amount': 'loan_amount', 'loanamount': 'loan_amount',
+  'mtg': 'loan_amount', 'mortgageamount': 'loan_amount', 'mortageamount': 'loan_amount',
+  'mortgage': 'loan_amount',
+  'mail date': 'mail_date', 'mail_date': 'mail_date', 'maildate': 'mail_date',
+
+  // ── Notes / Best Time ──
+  'notes': 'notes', 'note': 'notes',
+  'best time to call': 'best_time_to_call', 'besttimetocall': 'best_time_to_call',
+  'besttime': 'best_time_to_call', 'best_time': 'best_time_to_call',
+  'comment': 'best_time_to_call', 'comments': 'best_time_to_call',
+
+  // ── LPD ──
   'lpd': 'lpd', 'lead purchase date': 'lpd', 'purchasedate': 'lpd',
-  // Tobacco / Medical / Spanish checkboxes
+
+  // ── Flags ──
   'tobacco': 'tobacco', 'tobacco?': 'tobacco', 'tobaccouse': 'tobacco',
   'smoker': 'tobacco', 'borrowertobaccouse': 'tobacco',
   'medical': 'medical', 'medical issues': 'medical', 'medicalissues': 'medical',
   'medical issues?': 'medical', 'borrowermedicalissues': 'medical',
   'preexistingconditions': 'medical',
   'spanish': 'spanish', 'spanish?': 'spanish',
-  // Gender
-  'gender': 'gender', 'sex': 'gender', 'genderidentity': 'gender',
-  // Home phone (extend existing aliases)
-  'landline': 'home_phone', 'recentlandline1': 'home_phone',
-  'phone2': 'home_phone', 'secondaryphone': 'home_phone', 'hphone': 'home_phone',
+
+  // ── Gender ──
+  'gender': 'gender', 'sex': 'gender', 'genderidentity': 'gender', 'gender_identity': 'gender',
 }
 
 export const STEP_LABELS = {
