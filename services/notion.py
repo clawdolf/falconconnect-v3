@@ -10,6 +10,7 @@ Property names match the actual Notion Leads DB schema (verified 2026-03-03):
   + custom "GHL Contact ID" rich_text (created if missing).
 """
 
+import asyncio
 import logging
 import re
 from datetime import datetime, timedelta, timezone
@@ -56,6 +57,19 @@ def _headers() -> Dict[str, str]:
     }
 
 
+async def _notion_post_with_retry(client: httpx.AsyncClient, url: str, **kwargs) -> httpx.Response:
+    """POST to Notion with automatic 429 retry (up to 3 attempts, 1s backoff)."""
+    for attempt in range(3):
+        resp = await client.post(url, **kwargs)
+        if resp.status_code == 429:
+            retry_after = int(resp.headers.get("Retry-After", "1"))
+            logger.warning("Notion 429 rate limit — waiting %ss (attempt %d)", retry_after, attempt + 1)
+            await asyncio.sleep(retry_after)
+            continue
+        return resp
+    return resp  # return last response after 3 attempts
+
+
 async def upsert_lead(
     lead: Dict[str, Any],
     ghl_contact_id: str,
@@ -99,7 +113,8 @@ async def upsert_lead(
     }
 
     async with httpx.AsyncClient(timeout=30) as client:
-        resp = await client.post(
+        resp = await _notion_post_with_retry(
+            client,
             f"{NOTION_BASE}/pages",
             headers=_headers(),
             json=payload,
@@ -141,7 +156,8 @@ async def _find_page_by_phone(database_id: str, phone: str) -> Optional[str]:
     }
 
     async with httpx.AsyncClient(timeout=30) as client:
-        resp = await client.post(
+        resp = await _notion_post_with_retry(
+            client,
             f"{NOTION_BASE}/databases/{database_id}/query",
             headers=_headers(),
             json=payload,

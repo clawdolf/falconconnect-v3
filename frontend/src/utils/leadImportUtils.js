@@ -67,6 +67,10 @@ export const LEAD_FIELDS = [
 ]
 
 export const COLUMN_ALIASES = {
+  // Full name (split into first/last in buildLeads)
+  'full name': 'full_name', 'fullname': 'full_name', 'name': 'full_name',
+  'borrowername': 'full_name', 'clientname': 'full_name', 'applicantname': 'full_name',
+  'primaryname': 'full_name',
   'first name': 'first_name', 'firstname': 'first_name', 'fname': 'first_name',
   'last name': 'last_name', 'lastname': 'last_name', 'lname': 'last_name',
   'phone': 'phone', 'cell': 'phone', 'cell phone': 'phone', 'mobile': 'phone', 'mobile phone': 'phone',
@@ -77,7 +81,8 @@ export const COLUMN_ALIASES = {
   'address': 'address', 'street': 'address', 'street address': 'address',
   'city': 'city', 'state': 'state', 'st': 'state',
   'zip': 'zip_code', 'zip_code': 'zip_code', 'zipcode': 'zip_code', 'zip code': 'zip_code', 'postal': 'zip_code',
-  'birth year': 'birth_year', 'birth_year': 'birth_year', 'birthyear': 'birth_year', 'dob': 'birth_year',
+  'birth year': 'birth_year', 'birth_year': 'birth_year', 'birthyear': 'birth_year',
+  // NOTE: 'dob' maps to full DOB date field (not birth_year) — see aliases below
   'source': 'lead_source', 'lead source': 'lead_source', 'lead_source': 'lead_source', 'vendor': 'lead_source',
   'type': 'lead_type', 'lead type': 'lead_type', 'lead_type': 'lead_type',
   'lead age': 'lead_age_bucket', 'lead_age': 'lead_age_bucket', 'lead_age_bucket': 'lead_age_bucket',
@@ -168,6 +173,15 @@ export function buildLeads(rows, headers, columnMap, vendor, tier, leadType, lea
         }
       }
     })
+    // RISK FIX: Full Name splitting — if CSV has no first_name/last_name but has 'name'/'full_name',
+    // split on first space to extract first + last
+    if (!lead.first_name && !lead.last_name && lead.full_name) {
+      const parts = String(lead.full_name).trim().split(/\s+/)
+      lead.first_name = parts[0] || ''
+      lead.last_name = parts.slice(1).join(' ') || parts[0] || ''
+      delete lead.full_name
+    }
+
     // BUG 12: Track dropped rows instead of silently skipping
     if (!lead.first_name || !lead.last_name || !lead.phone) {
       droppedCount++
@@ -181,7 +195,16 @@ export function buildLeads(rows, headers, columnMap, vendor, tier, leadType, lea
     // Field-parity: tier and LPD from wizard-level metadata
     if (tier && !lead.tier) lead.tier = tier
     if (purchaseDate && !lead.lpd) lead.lpd = purchaseDate
-    if (lead.birth_year) { const yr = parseInt(lead.birth_year, 10); lead.birth_year = isNaN(yr) ? undefined : yr }
+    // RISK FIX: 2-digit birth year (e.g. "65" → 1965, not 65)
+    if (lead.birth_year) {
+      let yr = parseInt(lead.birth_year, 10)
+      if (!isNaN(yr)) {
+        if (yr >= 0 && yr <= 99) yr += yr >= 0 && yr <= 24 ? 2000 : 1900  // 65→1965, 24→2024
+        lead.birth_year = yr
+      } else {
+        lead.birth_year = undefined
+      }
+    }
     leads.push(lead)
   }
   return { leads, droppedCount }
