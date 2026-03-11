@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback } from 'react'
 import * as XLSX from 'xlsx'
 import {
-  VENDOR_TIERS, NEEDS_LEAD_AGE, LEAD_AGE_BUCKETS, LEAD_TYPES, LEAD_VENDORS,
+  VENDOR_TIERS, NEEDS_LEAD_AGE, VENDOR_AGE_BUCKETS, LEAD_TYPES, LEAD_VENDORS,
   LEAD_FIELDS, STEP_LABELS, autoMapHeaders, autoDetectVendor, buildLeads,
 } from '../utils/leadImportUtils'
 import QuickAddLead from './QuickAddLead'
@@ -406,7 +406,7 @@ function LeadImport() {
                 <label className="form-label">Lead Age Bucket <span style={{ fontWeight: 400, color: 'var(--text-muted)', fontSize: '0.65rem' }}>(applied only to rows without their own value)</span></label>
                 <select className="form-input" value={leadAge} onChange={e => setLeadAge(e.target.value)}>
                   <option value="">N/A</option>
-                  {LEAD_AGE_BUCKETS.map(a => <option key={a} value={a}>{a}</option>)}
+                  {(VENDOR_AGE_BUCKETS[vendor] || []).map(a => <option key={a} value={a}>{a}</option>)}
                 </select>
               </div>
             )}

@@ -8,7 +8,7 @@ export const VENDOR_TIERS = {
   'Proven Leads': ['N/A'],
   'Aria Leads': ['Gold', 'Silver', 'N/A'],
   'MilMo': ['Gold', 'Silver', 'N/A'],
-  'Cheryl': ['Gold', 'Silver', 'N/A'],
+  'Cheryl': ['T1', 'T2', 'T3', 'T4', 'T5'],
 }
 
 export const NEEDS_LEAD_AGE = {
@@ -19,6 +19,16 @@ export const NEEDS_LEAD_AGE = {
   'Cheryl': true,
 }
 
+// Per-vendor age buckets — each vendor can have different bracket labels
+export const VENDOR_AGE_BUCKETS = {
+  'HOFLeads': [],
+  'Proven Leads': ['7\u201312M', '13\u201324M', '25\u201336M', '37\u201348M', '49\u201360M', '60+M'],
+  'Aria Leads': ['7\u201312M', '13\u201324M', '25\u201336M', '37\u201348M', '49\u201360M', '60+M'],
+  'MilMo': ['7\u201312M', '13\u201324M', '25\u201336M', '37\u201348M', '49\u201360M', '60+M'],
+  'Cheryl': ['T1', 'T2', 'T3', 'T4', 'T5'],
+}
+
+// Legacy fallback — kept for any code that imported LEAD_AGE_BUCKETS directly
 export const LEAD_AGE_BUCKETS = ['7\u201312M', '13\u201324M', '25\u201336M', '37\u201348M', '49\u201360M', '60+M']
 
 export const LEAD_TYPES = ['Mortgage Protection', 'Final Expense', 'Annuity', 'IUL']
