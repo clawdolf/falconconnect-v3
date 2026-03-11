@@ -265,6 +265,69 @@ def _build_properties(
         }
     # If no notes, the default "GHL:{id}" set above is preserved
 
+    # ── Field-parity additions (match old Notion import script) ──
+
+    # Tier (select)
+    if lead.get("tier"):
+        props["Tier"] = {"select": {"name": lead["tier"]}}
+
+    # LPD — Lead Purchase Date (date) — when Seb bought the leads
+    if lead.get("lpd"):
+        lpd_val = lead["lpd"]
+        if hasattr(lpd_val, "isoformat"):
+            lpd_val = lpd_val.isoformat()
+        props["LPD"] = {"date": {"start": str(lpd_val)}}
+
+    # Call In Date — always set to today on create
+    props["Call In Date"] = {"date": {"start": datetime.now().strftime("%Y-%m-%d")}}
+
+    # Best Time to Call (rich_text)
+    if lead.get("best_time_to_call"):
+        props["Best Time to Call"] = {
+            "rich_text": [{"text": {"content": str(lead["best_time_to_call"])[:2000]}}]
+        }
+
+    # Gender (rich_text)
+    if lead.get("gender"):
+        props["Gender"] = {
+            "rich_text": [{"text": {"content": str(lead["gender"])}}]
+        }
+
+    # DOB (date) — full date of birth
+    if lead.get("dob"):
+        dob_val = lead["dob"]
+        if hasattr(dob_val, "isoformat"):
+            dob_val = dob_val.isoformat()
+        props["DOB"] = {"date": {"start": str(dob_val)}}
+
+    # Home Phone (phone_number)
+    if lead.get("home_phone"):
+        props["Home Phone"] = {"phone_number": lead["home_phone"]}
+
+    # Spouse Cell (phone_number)
+    if lead.get("spouse_phone"):
+        props["Spouse Cell"] = {"phone_number": lead["spouse_phone"]}
+
+    # Lender (rich_text)
+    if lead.get("lender"):
+        props["Lender"] = {
+            "rich_text": [{"text": {"content": str(lead["lender"])}}]
+        }
+
+    # Loan Amount (rich_text)
+    if lead.get("loan_amount"):
+        props["Loan Amount"] = {
+            "rich_text": [{"text": {"content": str(lead["loan_amount"])}}]
+        }
+
+    # Checkbox fields
+    if lead.get("tobacco") is not None:
+        props["Tobacco?"] = {"checkbox": bool(lead["tobacco"])}
+    if lead.get("medical") is not None:
+        props["Medical Issues?"] = {"checkbox": bool(lead["medical"])}
+    if lead.get("spanish") is not None:
+        props["Spanish?"] = {"checkbox": bool(lead["spanish"])}
+
     return props
 
 

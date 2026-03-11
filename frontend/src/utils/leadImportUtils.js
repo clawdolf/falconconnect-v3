@@ -43,6 +43,15 @@ export const LEAD_FIELDS = [
   { value: 'loan_amount', label: 'Loan Amount' },
   { value: 'mail_date', label: 'Mail Date' },
   { value: 'notes', label: 'Notes' },
+  { value: 'gender', label: 'Gender' },
+  { value: 'home_phone', label: 'Home Phone' },
+  { value: 'spouse_phone', label: 'Spouse Phone' },
+  { value: 'best_time_to_call', label: 'Best Time to Call' },
+  { value: 'dob', label: 'DOB (Full Date)' },
+  { value: 'lpd', label: 'Lead Purchase Date (LPD)' },
+  { value: 'tobacco', label: 'Tobacco?' },
+  { value: 'medical', label: 'Medical Issues?' },
+  { value: 'spanish', label: 'Spanish?' },
 ]
 
 export const COLUMN_ALIASES = {
@@ -63,7 +72,27 @@ export const COLUMN_ALIASES = {
   'lender': 'lender', 'mortgage company': 'lender',
   'loan amount': 'loan_amount', 'loan_amount': 'loan_amount', 'loanamount': 'loan_amount',
   'mail date': 'mail_date', 'mail_date': 'mail_date', 'maildate': 'mail_date',
-  'notes': 'notes', 'note': 'notes', 'comments': 'notes',
+  'notes': 'notes', 'note': 'notes',
+  // Best Time to Call / Comments → dedicated field (not notes)
+  'best time to call': 'best_time_to_call', 'besttimetocall': 'best_time_to_call',
+  'comment': 'best_time_to_call', 'comments': 'best_time_to_call',
+  // DOB (full date — separate from birth_year)
+  'dob': 'dob', 'date of birth': 'dob', 'dateofbirth': 'dob',
+  'birthdate': 'dob', 'birth_date': 'dob',
+  // LPD — Lead Purchase Date
+  'lpd': 'lpd', 'lead purchase date': 'lpd', 'purchasedate': 'lpd',
+  // Tobacco / Medical / Spanish checkboxes
+  'tobacco': 'tobacco', 'tobacco?': 'tobacco', 'tobaccouse': 'tobacco',
+  'smoker': 'tobacco', 'borrowertobaccouse': 'tobacco',
+  'medical': 'medical', 'medical issues': 'medical', 'medicalissues': 'medical',
+  'medical issues?': 'medical', 'borrowermedicalissues': 'medical',
+  'preexistingconditions': 'medical',
+  'spanish': 'spanish', 'spanish?': 'spanish',
+  // Gender
+  'gender': 'gender', 'sex': 'gender', 'genderidentity': 'gender',
+  // Home phone (extend existing aliases)
+  'landline': 'home_phone', 'recentlandline1': 'home_phone',
+  'phone2': 'home_phone', 'secondaryphone': 'home_phone', 'hphone': 'home_phone',
 }
 
 export const STEP_LABELS = {
@@ -119,7 +148,12 @@ export function buildLeads(rows, headers, columnMap, vendor, tier, leadType, lea
     headers.forEach((h, i) => {
       const field = columnMap[h]
       if (field && row[i] !== undefined && row[i] !== null && String(row[i]).trim()) {
-        lead[field] = String(row[i]).trim()
+        // Normalize boolean fields from CSV strings
+        if (['tobacco', 'medical', 'spanish'].includes(field)) {
+          lead[field] = ['true','1','yes','y','x','si','sí'].includes(String(row[i]).trim().toLowerCase())
+        } else {
+          lead[field] = String(row[i]).trim()
+        }
       }
     })
     // BUG 12: Track dropped rows instead of silently skipping
@@ -132,6 +166,9 @@ export function buildLeads(rows, headers, columnMap, vendor, tier, leadType, lea
     // BUG 9 FIX: Only apply batch lead age if row doesn't already have one
     if (leadAge && !lead.lead_age_bucket) lead.lead_age_bucket = leadAge
     if (purchaseDate && !lead.mail_date) lead.mail_date = purchaseDate
+    // Field-parity: tier and LPD from wizard-level metadata
+    if (tier && !lead.tier) lead.tier = tier
+    if (purchaseDate && !lead.lpd) lead.lpd = purchaseDate
     if (lead.birth_year) { const yr = parseInt(lead.birth_year, 10); lead.birth_year = isNaN(yr) ? undefined : yr }
     leads.push(lead)
   }

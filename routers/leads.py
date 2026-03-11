@@ -51,6 +51,15 @@ class BulkLeadItem(BaseModel):
     mobile_phone: Optional[str] = Field(None, max_length=40)
     spouse_phone: Optional[str] = Field(None, max_length=40)
     notes: Optional[str] = Field(None, max_length=2000)
+    # Field-parity additions (match old Notion import script)
+    tier: Optional[str] = Field(None, max_length=32)
+    lpd: Optional[str] = None
+    dob: Optional[str] = None
+    best_time_to_call: Optional[str] = Field(None, max_length=256)
+    gender: Optional[str] = Field(None, max_length=32)
+    tobacco: Optional[bool] = None
+    medical: Optional[bool] = None
+    spanish: Optional[bool] = None
 
     @field_validator('birth_year')
     @classmethod
