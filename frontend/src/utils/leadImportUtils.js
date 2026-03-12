@@ -296,7 +296,7 @@ export function autoDetectVendor(filename) {
   } else if (fn.includes('proven')) { out.vendor = 'Proven Leads'; out.tier = 'N/A' }
   else if (fn.includes('aria')) { out.vendor = 'Aria Leads'; out.tier = 'Gold' }
   else if (fn.includes('milmo')) { out.vendor = 'MilMo'; out.tier = 'Gold' }
-  else if (fn.includes('cheryl')) { out.vendor = 'Cheryl'; out.tier = 'T1' }
+  else if (fn.includes('scl') || fn.includes('cheryl')) { out.vendor = 'Cheryl'; out.tier = 'T1' }
   if (fn.includes('final expense') || fn.includes('_fe_')) out.leadType = 'Final Expense'
   else if (fn.includes('annuity')) out.leadType = 'Annuity'
   else if (fn.includes('iul')) out.leadType = 'IUL'
@@ -356,6 +356,30 @@ function normalizeDateValue(val) {
 
 /** Fields that contain date values and should be normalized */
 const DATE_FIELDS = ['dob', 'mail_date', 'lpd', 'lead_received', 'spouse_dob']
+
+/**
+ * Determine Cheryl vendor tier from lead_received date.
+ * Cheryl Partner Pricing:
+ *   T1: 2025-06-01 – 2025-11-30
+ *   T2: 2024-03-01 – 2025-05-31
+ *   T3: 2021-03-01 – 2024-02-29
+ *
+ * Sample verifications from SCL_IMG file:
+ *   John Hilton:       2025-02-20 → T2
+ *   Jacob Stern:       2025-08-11 → T1
+ *   Dale Mackenstadt:  2025-11-05 → T1
+ *   Charles Saksa:     2025-11-07 → T1
+ */
+function getCherylTier(dateStr) {
+  if (!dateStr) return null
+  const d = new Date(dateStr + 'T00:00:00')  // force local midnight parse
+  if (isNaN(d)) return null
+  const ymd = d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate()
+  if (ymd >= 20250601 && ymd <= 20251130) return 'T1'
+  if (ymd >= 20240301 && ymd <= 20250531) return 'T2'
+  if (ymd >= 20210301 && ymd <= 20240229) return 'T3'
+  return null
+}
 
 
 // ═══════════════════════════════════════════════
@@ -441,6 +465,11 @@ export function buildLeads(rows, headers, columnMap, vendor, tier, leadType, lea
     if (leadType && !lead.lead_type) lead.lead_type = leadType
     if (leadAge && !lead.lead_age_bucket) lead.lead_age_bucket = leadAge
     if (purchaseDate && !lead.mail_date) lead.mail_date = purchaseDate
+    // Cheryl: auto-assign tier from lead_received date (overrides file-level tier)
+    if (vendor === 'Cheryl' && lead.lead_received) {
+      const cherylTier = getCherylTier(lead.lead_received)
+      if (cherylTier) lead.tier = cherylTier
+    }
     if (tier && !lead.tier) lead.tier = tier
     if (purchaseDate && !lead.lpd) lead.lpd = purchaseDate
 
