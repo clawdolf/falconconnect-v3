@@ -32,7 +32,7 @@ export const NEEDS_LEAD_AGE = {
 
 export const VENDOR_AGE_BUCKETS = {
   'HOFLeads':      [],
-  'Proven Leads':  ['7\u201312M', '13\u201324M', '25\u201336M', '37\u201348M', '49\u201360M', '60+M'],
+  'Proven Leads':  ['3M', '6M', '7\u201312M', '13\u201324M', '25\u201336M', '37\u201348M', '49\u201360M', '60+M'],
   'Aria Leads':    ['7\u201312M', '13\u201324M', '25\u201336M', '37\u201348M', '49\u201360M', '60+M'],
   'MilMo':         ['7\u201312M', '13\u201324M', '25\u201336M', '37\u201348M', '49\u201360M', '60+M'],
   'Cheryl':        ['T1', 'T2', 'T3', 'T4', 'T5'],
