@@ -32,11 +32,31 @@ router = APIRouter()
 
 @router.get("/agents")
 async def list_agents(session: AsyncSession = Depends(get_session)):
-    """List all active public agents."""
+    """List all active public agents, including live license count and state abbreviations."""
+    from db.models import License as DBLicense
+    from sqlalchemy import func
+
     result = await session.execute(
         select(DBAgent).where(DBAgent.is_active == True).order_by(DBAgent.name)
     )
     agents = result.scalars().all()
+
+    # Fetch active licenses for all agents in one query
+    license_result = await session.execute(
+        select(DBLicense.agent_id, DBLicense.state_abbreviation)
+        .where(DBLicense.status == "active")
+    )
+    license_rows = license_result.all()
+
+    # Build map: agent_id → sorted list of abbreviations
+    from collections import defaultdict
+    agent_licenses: dict[int, list[str]] = defaultdict(list)
+    for agent_id, abbr in license_rows:
+        if abbr:
+            agent_licenses[agent_id].append(abbr)
+    for k in agent_licenses:
+        agent_licenses[k] = sorted(agent_licenses[k])
+
     return [
         {
             "name": a.name,
@@ -50,6 +70,8 @@ async def list_agents(session: AsyncSession = Depends(get_session)):
             "npn": a.npn,
             "location": a.location,
             "carrier_count": a.carrier_count,
+            "license_count": len(agent_licenses[a.id]),
+            "licensed_states": agent_licenses[a.id],
         }
         for a in agents
     ]
