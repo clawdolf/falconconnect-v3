@@ -31,9 +31,10 @@ from typing import Optional
 SOLAR_STATES = {
     "AL", "AK", "AZ", "AR", "CO", "CT", "DE", "DC", "GA",
     "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "MD",
-    "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ",
+    "MA", "MI", "MN", "MS", "MO", "NE", "NV", "NH", "NJ",
     "NM", "NC", "ND", "OH", "OK", "OR", "RI", "SC", "SD",
     "TN", "UT", "VT", "VA", "WA", "WV", "WI", "WY",
+    # NOTE: MT removed — NAIC SOLAR has no data for MT producers. Use STATE_PORTALS instead.
 }
 
 # =============================================================================
@@ -76,12 +77,16 @@ STATE_PORTALS = {
     
     # Maine: Bureau of Insurance ALMS system (direct link with token if available)
     "ME": "https://www.pfr.maine.gov/ALMSOnline/ALMSQuery/SearchIndividual.aspx",
+    
+    # Montana: CSI (Commissioner of Securities and Insurance) — NAIC SOLAR has no MT data
+    # Directs consumers to the state's own insurance producer lookup
+    "MT": "https://csimt.gov/insurance/",
 }
 
 # States where the user needs to manually enter a license number on the portal
 # FL is excluded here — it has a direct link once fl_internal_id is resolved.
 # If fl_internal_id is missing, FL falls back to the search portal (functionally manual).
-MANUAL_ENTRY_STATES = {"TX", "PA", "CA", "NY", "ME"}
+MANUAL_ENTRY_STATES = {"TX", "PA", "CA", "NY", "ME", "MT"}
 
 # States using FL-style independent portals that require a one-time automated lookup
 # to resolve a direct permalink (stored as fl_internal_id or equivalent in the DB).
@@ -143,11 +148,6 @@ def get_verify_url(state_abbr: str, npn: str, license_number: str = None,
 
     # --- NAIC SOLAR states: deep-link via NPN ---
     if state_abbr in SOLAR_STATES:
-        # Montana's SOLAR jurisdiction-specific lookup is currently blank
-        # Use base NAIC SOLAR NPN lookup instead (may show national data at least)
-        if state_abbr == "MT":
-            return f"https://sbs.naic.org/solar-external-lookup/lookup/licensee/summary/{npn}"
-        
         return (
             f"https://sbs.naic.org/solar-external-lookup/"
             f"lookup/licensee/summary/{npn}"
