@@ -10,6 +10,7 @@ Usage:
         user_id = user["sub"]  # Clerk user ID
 """
 
+import base64
 import logging
 from typing import Any, Dict, Optional
 
@@ -24,19 +25,51 @@ logger = logging.getLogger("falconconnect.auth.clerk")
 
 security = HTTPBearer(auto_error=False)
 
-# Clerk JWKS endpoint — no auth needed to fetch public keys
-CLERK_JWKS_URL = "https://api.clerk.com/v1/jwks"
-
 # Simple in-process JWKS cache (keys rarely rotate)
 _jwks_cache: Optional[Dict] = None
+
+
+def _get_clerk_jwks_url() -> str:
+    """Derive the public JWKS URL from the publishable key.
+
+    The publishable key encodes the Clerk Frontend API domain in base64.
+    E.g. pk_live_Y2xlcmsuZmFsY29ubmVjdC5vcmck decodes to clerk.falconnect.org
+    This endpoint serves JWKS without requiring authentication, unlike
+    api.clerk.com/v1/jwks which needs a Bearer token.
+    """
+    settings = get_settings()
+    pk = settings.clerk_publishable_key
+    if pk:
+        # Strip pk_live_ or pk_test_ prefix, decode base64 to get domain
+        try:
+            encoded = pk.split("_", 2)[2]  # after pk_live_ or pk_test_
+            domain = base64.b64decode(encoded + "==").decode("utf-8").rstrip("\x00$")
+            url = f"https://{domain}/.well-known/jwks.json"
+            logger.info("Using Clerk JWKS URL: %s", url)
+            return url
+        except Exception as e:
+            logger.warning("Failed to derive JWKS URL from publishable key: %s", e)
+
+    # Fallback: use api.clerk.com with secret key auth (handled in _get_jwks)
+    return "https://api.clerk.com/v1/jwks"
 
 
 async def _get_jwks() -> Dict:
     global _jwks_cache
     if _jwks_cache:
         return _jwks_cache
+
+    jwks_url = _get_clerk_jwks_url()
+    headers = {}
+
+    # api.clerk.com/v1/jwks requires Bearer auth; the Frontend API URL does not
+    if "api.clerk.com" in jwks_url:
+        settings = get_settings()
+        if settings.clerk_secret_key:
+            headers["Authorization"] = f"Bearer {settings.clerk_secret_key}"
+
     async with httpx.AsyncClient(timeout=10) as client:
-        resp = await client.get(CLERK_JWKS_URL)
+        resp = await client.get(jwks_url, headers=headers)
         resp.raise_for_status()
         _jwks_cache = resp.json()
     return _jwks_cache
