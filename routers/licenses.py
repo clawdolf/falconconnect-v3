@@ -405,14 +405,17 @@ async def health_check_verify_urls(
     Used by the frontend to show green/red dots next to Verify links.
     """
     async def check_url(url: str) -> UrlHealth:
+        headers = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/120.0 Safari/537.36"}
         try:
-            async with httpx.AsyncClient(
-                timeout=10,
-                follow_redirects=True,
-                verify=False,
-            ) as client:
+            async with httpx.AsyncClient(timeout=10, follow_redirects=True, verify=False, headers=headers) as client:
                 resp = await client.head(url)
-                return UrlHealth(url=url, ok=resp.status_code < 400)
+                # 403/405 = site is up but blocks server-side requests (NAIC SOLAR, state DOI)
+                # Only mark red on 5xx (broken server) — 4xx means the server responded fine
+                if resp.status_code < 500:
+                    return UrlHealth(url=url, ok=True)
+                # Try GET as fallback for HEAD-blocking servers
+                resp2 = await client.get(url)
+                return UrlHealth(url=url, ok=resp2.status_code < 500)
         except Exception:
             return UrlHealth(url=url, ok=False)
 
