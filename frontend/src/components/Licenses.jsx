@@ -25,9 +25,15 @@ function StateInput({ value, onChange, onSelect }) {
   const [open, setOpen] = useState(false)
   const [highlighted, setHighlighted] = useState(0)
   const wrapRef = useRef(null)
+  // Track previous value so we only reset query when parent explicitly clears (not on every re-render)
+  const prevValueRef = useRef(value)
 
-  // Sync external value reset
-  useEffect(() => { if (!value) { setQuery(''); setSuggestions([]) } }, [value])
+  useEffect(() => {
+    const prev = prevValueRef.current
+    prevValueRef.current = value
+    // Only wipe the input when parent clears it (non-empty → empty), not while user is typing
+    if (!value && prev) { setQuery(''); setSuggestions([]) }
+  }, [value])
 
   const handleChange = (e) => {
     const q = e.target.value
@@ -40,10 +46,10 @@ function StateInput({ value, onChange, onSelect }) {
     setSuggestions(matches)
     setOpen(matches.length > 0)
     setHighlighted(0)
-    // If user typed exact abbrev match, auto-resolve
+    // If user typed exact abbrev match (e.g. "AZ"), auto-resolve
     const exactAbbr = STATE_NAMES.find(s => STATE_MAP[s].toLowerCase() === lq)
     if (exactAbbr) { onChange(exactAbbr, STATE_MAP[exactAbbr]); return }
-    onChange('', '')
+    // Don't call onChange('','') here — that's what triggers the parent re-render + input wipe
   }
 
   const pick = (state) => {
