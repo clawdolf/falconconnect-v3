@@ -161,11 +161,12 @@ export const COLUMN_ALIASES = {
   // ── Spouse DOB / Age ──
   'birthdate 2': 'spouse_dob', 'birthdate2': 'spouse_dob',  // Cheryl vendor format
   'spouse dob': 'spouse_dob', 'spouse_dob': 'spouse_dob',
-  'spouse birthdate': 'spouse_dob',
+  'spouse birthdate': 'spouse_dob', 'spouse birth date': 'spouse_dob',
+  'co dob': 'spouse_dob',
   'coborrower dob': 'spouse_dob', 'co-borrower dob': 'spouse_dob',
   'age2': 'spouse_age',  // Cheryl vendor format
   'spouse age': 'spouse_age', 'spouse_age': 'spouse_age',
-  'coborrower age': 'spouse_age',
+  'co age': 'spouse_age', 'coborrower age': 'spouse_age',
 
   // ── Lead metadata ──
   'source': 'lead_source', 'lead source': 'lead_source', 'lead_source': 'lead_source',
