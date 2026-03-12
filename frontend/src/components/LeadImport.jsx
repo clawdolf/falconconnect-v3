@@ -134,9 +134,9 @@ function LeadImport() {
       const fq = fileQueue[fi]
       updateFileQueueItem(fi, { status: 'importing' })
       setProgress(prev => ({ ...prev, fileIndex: fi, fileName: fq.name }))
-      const { leads, droppedCount } = buildLeads(fq.parsedRows, fq.headers, columnMap, fq.vendor, fq.tier, fq.leadType, fq.leadAge, fq.purchaseDate)
+      const { leads, droppedCount, droppedRows } = buildLeads(fq.parsedRows, fq.headers, columnMap, fq.vendor, fq.tier, fq.leadType, fq.leadAge, fq.purchaseDate)
       grandDropped += droppedCount
-      if (!leads.length) { updateFileQueueItem(fi, { status: 'done', result: { created: 0, failed: 0, ghlWarnings: [], droppedCount } }); continue }
+      if (!leads.length) { updateFileQueueItem(fi, { status: 'done', result: { created: 0, failed: 0, ghlWarnings: [], droppedCount, droppedRows } }); continue }
       let fileCreated = 0, fileFailed = 0; const fileGhlWarnings = [], fileErrors = []
       for (let i = 0; i < leads.length; i += BS) {
         const batch = leads.slice(i, i + BS)
@@ -153,7 +153,7 @@ function LeadImport() {
         setProgress(prev => ({ ...prev, current: Math.min(processedLeads, totalLeads) }))
         if (i + BS < leads.length) await new Promise(r => setTimeout(r, 100))
       }
-      updateFileQueueItem(fi, { status: fileFailed > 0 && fileCreated === 0 ? 'error' : 'done', result: { created: fileCreated, failed: fileFailed, ghlWarnings: fileGhlWarnings, errors: fileErrors, droppedCount } })
+      updateFileQueueItem(fi, { status: fileFailed > 0 && fileCreated === 0 ? 'error' : 'done', result: { created: fileCreated, failed: fileFailed, ghlWarnings: fileGhlWarnings, errors: fileErrors, droppedCount, droppedRows } })
       grandCreated += fileCreated; grandFailed += fileFailed; grandErrors.push(...fileErrors); grandGhlWarnings.push(...fileGhlWarnings)
       if (fi + 1 < fileQueue.length) await new Promise(r => setTimeout(r, 200))
     }
@@ -432,6 +432,50 @@ function LeadImport() {
                 </table>
               </div>
             )}
+
+            {(() => {
+              const allDropped = fileQueue.flatMap(fq => (fq.result?.droppedRows || []).map(d => ({ ...d, file: fq.name.replace(/\.[^.]+$/, '') })))
+              if (!allDropped.length) return null
+              const allKeys = [...new Set(allDropped.flatMap(d => Object.keys(d.raw)))]
+              const downloadCsv = () => {
+                const cols = ['file', 'reason', ...allKeys]
+                const rows = allDropped.map(d => cols.map(c => c === 'file' ? d.file : c === 'reason' ? d.reason : (d.raw[c] || '')).map(v => '"' + String(v).replace(/"/g, '""') + '"').join(','))
+                const csv = [cols.join(','), ...rows].join('\n')
+                const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' })); a.download = 'dropped_leads.csv'; a.click()
+              }
+              return (
+                <div style={{ marginBottom: '1rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                    <h4 style={{ fontFamily: 'var(--font-display)', fontSize: '0.75rem', fontWeight: 600, color: 'var(--amber)', margin: 0 }}>
+                      Dropped Rows ({allDropped.length}) — Missing required fields
+                    </h4>
+                    <button className="btn btn-sm" onClick={downloadCsv} style={{ fontSize: '0.65rem', padding: '0.2rem 0.6rem', color: 'var(--amber)', borderColor: 'var(--amber)' }}>
+                      ↓ Download CSV
+                    </button>
+                  </div>
+                  <div style={{ overflowX: 'auto', maxHeight: 220, border: '1px solid oklch(25% 0.05 75)', borderRadius: 3 }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: 'var(--font-mono)', fontSize: '0.65rem', whiteSpace: 'nowrap' }}>
+                      <thead>
+                        <tr style={{ background: 'oklch(18% 0.04 75)' }}>
+                          <th style={{ padding: '0.3rem 0.5rem', textAlign: 'left', color: 'var(--amber)', borderBottom: '1px solid oklch(25% 0.05 75)', position: 'sticky', top: 0, background: 'oklch(18% 0.04 75)' }}>File</th>
+                          <th style={{ padding: '0.3rem 0.5rem', textAlign: 'left', color: 'var(--amber)', borderBottom: '1px solid oklch(25% 0.05 75)', position: 'sticky', top: 0, background: 'oklch(18% 0.04 75)' }}>Reason</th>
+                          {allKeys.map(k => <th key={k} style={{ padding: '0.3rem 0.5rem', textAlign: 'left', color: 'var(--text-muted)', borderBottom: '1px solid oklch(25% 0.05 75)', position: 'sticky', top: 0, background: 'oklch(18% 0.04 75)' }}>{k}</th>)}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {allDropped.map((d, i) => (
+                          <tr key={i} style={{ background: i % 2 === 0 ? 'oklch(14% 0.03 75 / 0.4)' : 'transparent' }}>
+                            <td style={{ padding: '0.3rem 0.5rem', color: 'var(--text-muted)', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis' }}>{d.file}</td>
+                            <td style={{ padding: '0.3rem 0.5rem', color: 'var(--amber)' }}>{d.reason}</td>
+                            {allKeys.map(k => <td key={k} style={{ padding: '0.3rem 0.5rem', color: 'var(--text)' }}>{d.raw[k] || ''}</td>)}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )
+            })()}
 
             {grandResult.errors && grandResult.errors.length > 0 && (
               <div style={{ marginBottom: '1rem' }}>

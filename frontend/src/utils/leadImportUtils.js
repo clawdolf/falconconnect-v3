@@ -307,6 +307,7 @@ export function autoDetectVendor(filename) {
 export function buildLeads(rows, headers, columnMap, vendor, tier, leadType, leadAge, purchaseDate) {
   const leads = []
   let droppedCount = 0
+  const droppedRows = []
   for (const row of rows) {
     const lead = {}
     headers.forEach((h, i) => {
@@ -334,8 +335,15 @@ export function buildLeads(rows, headers, columnMap, vendor, tier, leadType, lea
     if (!lead.phone && lead.mobile_phone) lead.phone = lead.mobile_phone
     if (!lead.phone && lead.home_phone) lead.phone = lead.home_phone
 
-    // Track dropped rows instead of silently skipping
+    // Track dropped rows with reason and original raw data
     if (!lead.first_name || !lead.last_name || !lead.phone) {
+      const missing = []
+      if (!lead.first_name) missing.push('first_name')
+      if (!lead.last_name) missing.push('last_name')
+      if (!lead.phone) missing.push('phone')
+      const rawObj = {}
+      headers.forEach((h, i) => { if (row[i] != null && String(row[i]).trim()) rawObj[h] = String(row[i]).trim() })
+      droppedRows.push({ reason: 'Missing: ' + missing.join(', '), raw: rawObj })
       droppedCount++
       continue
     }
@@ -361,5 +369,5 @@ export function buildLeads(rows, headers, columnMap, vendor, tier, leadType, lea
 
     leads.push(lead)
   }
-  return { leads, droppedCount }
+  return { leads, droppedCount, droppedRows }
 }
