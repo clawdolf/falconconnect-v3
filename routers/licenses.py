@@ -97,6 +97,11 @@ async def get_public_licenses(
     result = await session.execute(stmt)
     licenses = result.scalars().all()
 
+    # Look up agent NPN once for all licenses (same user)
+    npn = None
+    if licenses:
+        npn = await _get_agent_npn(session, licenses[0].user_id)
+
     return [
         License(
             id=lic.id,
@@ -107,6 +112,7 @@ async def get_public_licenses(
             needs_manual_verification=lic.needs_manual_verification,
             status=lic.status,
             license_type=lic.license_type,
+            npn=npn or None,  # Fallback display for SBS states with no state license number
         )
         for lic in licenses
     ]

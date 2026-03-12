@@ -24,6 +24,7 @@ class License(BaseModel):
     needs_manual_verification: bool = False
     status: str = "active"
     license_type: str = "insurance_producer"
+    npn: Optional[str] = None  # Returned as display fallback for SBS states with no state license number
 
 
 class LicenseCreate(BaseModel):
