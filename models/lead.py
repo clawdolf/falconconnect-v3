@@ -15,6 +15,7 @@ class LeadPayload(BaseModel):
     email: Optional[str] = Field(None, max_length=256)
     address: Optional[str] = Field(None, max_length=512)
     city: Optional[str] = Field(None, max_length=128)
+    county: Optional[str] = Field(None, max_length=128)
     state: Optional[str] = Field(None, max_length=2)
     zip_code: Optional[str] = Field(None, max_length=10)
     # BUG 8 FIX: Dynamic max year instead of hardcoded 2026

@@ -259,6 +259,8 @@ def _build_properties(
         props["Address"] = {"rich_text": [{"text": {"content": lead["address"]}}]}
     if lead.get("city"):
         props["City"] = {"rich_text": [{"text": {"content": lead["city"]}}]}
+    if lead.get("county"):
+        props["County"] = {"rich_text": [{"text": {"content": lead["county"]}}]}
     if lead.get("zip_code"):
         # Normalize ZIP: extract first 5 digits, left-pad with zeros if short (Maine etc.)
         _zip_digits = re.sub(r"\D", "", str(lead["zip_code"]))[:5]
