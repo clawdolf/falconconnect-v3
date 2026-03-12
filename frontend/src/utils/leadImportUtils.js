@@ -147,8 +147,10 @@ export const COLUMN_ALIASES = {
   // ── DOB / Age ──
   'dob': 'dob', 'date of birth': 'dob', 'dateofbirth': 'dob',
   'birthdate': 'dob', 'birth_date': 'dob', 'birth date': 'dob',
+  'birthdate 1': 'dob', 'birthdate1': 'dob',  // Cheryl vendor format
   'birth year': 'birth_year', 'birth_year': 'birth_year', 'birthyear': 'birth_year',
   'age': 'birth_year', 'borrowerage': 'birth_year',
+  'age1': 'birth_year',  // Cheryl vendor format (redundant if BIRTHDATE 1 mapped, but safe)
 
   // ── Lead metadata ──
   'source': 'lead_source', 'lead source': 'lead_source', 'lead_source': 'lead_source',
@@ -162,7 +164,9 @@ export const COLUMN_ALIASES = {
   'loan amount': 'loan_amount', 'loan_amount': 'loan_amount', 'loanamount': 'loan_amount',
   'mtg': 'loan_amount', 'mortgageamount': 'loan_amount', 'mortageamount': 'loan_amount',
   'mortgage': 'loan_amount',
+  'mtg amt': 'loan_amount', 'mtgamt': 'loan_amount',  // Cheryl vendor format
   'mail date': 'mail_date', 'mail_date': 'mail_date', 'maildate': 'mail_date',
+  'closing date': 'mail_date', 'closingdate': 'mail_date',  // Cheryl vendor format (closest FC equivalent)
 
   // ── Notes / Best Time ──
   'notes': 'notes', 'note': 'notes',
@@ -176,6 +180,7 @@ export const COLUMN_ALIASES = {
   // ── Flags ──
   'tobacco': 'tobacco', 'tobacco?': 'tobacco', 'tobaccouse': 'tobacco',
   'smoker': 'tobacco', 'borrowertobaccouse': 'tobacco',
+  'tobacco 1': 'tobacco', 'tobacco1': 'tobacco',  // Cheryl vendor format
   'medical': 'medical', 'medical issues': 'medical', 'medicalissues': 'medical',
   'medical issues?': 'medical', 'borrowermedicalissues': 'medical',
   'preexistingconditions': 'medical',
