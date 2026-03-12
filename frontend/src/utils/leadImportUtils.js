@@ -71,6 +71,7 @@ export const LEAD_FIELDS = [
   { value: 'email', label: 'Email' },
   { value: 'address', label: 'Address' },
   { value: 'city', label: 'City' },
+  { value: 'county', label: 'County' },
   { value: 'state', label: 'State' },
   { value: 'zip_code', label: 'ZIP Code' },
 
@@ -137,6 +138,7 @@ export const COLUMN_ALIASES = {
   'address': 'address', 'street': 'address', 'street address': 'address',
   'streetaddress': 'address', 'addr': 'address',
   'city': 'city', 'town': 'city',
+  'county': 'county', 'county name': 'county', 'countyname': 'county',
   'state': 'state', 'st': 'state',
   'zip': 'zip_code', 'zip_code': 'zip_code', 'zipcode': 'zip_code',
   'zip code': 'zip_code', 'zip_plus_four': 'zip_code', 'postal': 'zip_code',
