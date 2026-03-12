@@ -143,6 +143,11 @@ def get_verify_url(state_abbr: str, npn: str, license_number: str = None,
 
     # --- NAIC SOLAR states: deep-link via NPN ---
     if state_abbr in SOLAR_STATES:
+        # Montana's SOLAR jurisdiction-specific lookup is currently blank
+        # Use base NAIC SOLAR NPN lookup instead (may show national data at least)
+        if state_abbr == "MT":
+            return f"https://sbs.naic.org/solar-external-lookup/lookup/licensee/summary/{npn}"
+        
         return (
             f"https://sbs.naic.org/solar-external-lookup/"
             f"lookup/licensee/summary/{npn}"
