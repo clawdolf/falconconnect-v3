@@ -34,7 +34,8 @@ SOLAR_STATES = {
     "MA", "MI", "MN", "MS", "MO", "NE", "NV", "NH", "NJ",
     "NM", "NC", "ND", "OH", "OK", "OR", "RI", "SC", "SD",
     "TN", "UT", "VT", "VA", "WA", "WV", "WI", "WY",
-    # NOTE: MT removed — NAIC SOLAR has no data for MT producers. Use STATE_PORTALS instead.
+    # NOTE: MT uses external-lookup-web.prod.naic.org with state license number (not NPN).
+    # Handled as a special case in get_verify_url() above SOLAR_STATES check.
 }
 
 # =============================================================================
@@ -78,15 +79,14 @@ STATE_PORTALS = {
     # Maine: Bureau of Insurance ALMS system (direct link with token if available)
     "ME": "https://www.pfr.maine.gov/ALMSOnline/ALMSQuery/SearchIndividual.aspx",
     
-    # Montana: CSI (Commissioner of Securities and Insurance) — NAIC SOLAR has no MT data
-    # Directs consumers to the state's own insurance producer lookup
+    # Montana: fallback only — get_verify_url() generates a direct link if license_number present
     "MT": "https://csimt.gov/insurance/",
 }
 
 # States where the user needs to manually enter a license number on the portal
 # FL is excluded here — it has a direct link once fl_internal_id is resolved.
 # If fl_internal_id is missing, FL falls back to the search portal (functionally manual).
-MANUAL_ENTRY_STATES = {"TX", "PA", "CA", "NY", "ME", "MT"}
+MANUAL_ENTRY_STATES = {"TX", "PA", "CA", "NY", "ME"}
 
 # States using FL-style independent portals that require a one-time automated lookup
 # to resolve a direct permalink (stored as fl_internal_id or equivalent in the DB).
@@ -145,6 +145,18 @@ def get_verify_url(state_abbr: str, npn: str, license_number: str = None,
     # --- Maine: direct link with token ---
     if state_abbr == "ME" and direct_token:
         return f"https://www.pfr.maine.gov/ALMSOnline/ALMSQuery/ShowDetail.aspx?DetailToken={direct_token}"
+
+    # --- Montana: uses external-lookup-web domain with state license number (not NPN) ---
+    # sbs.naic.org/solar-external-lookup returns blank for MT — use the prod external lookup
+    # domain with the state license number as the identifier instead.
+    if state_abbr == "MT":
+        if license_number:
+            return (
+                f"https://external-lookup-web.prod.naic.org/lookup/licensee/summary/{license_number}"
+                f"?jurisdiction=MT&entityType=IND&licenseType=PRO"
+            )
+        # No license number — fall back to state portal
+        return STATE_PORTALS.get("MT", "https://csimt.gov/insurance/")
 
     # --- NAIC SOLAR states: deep-link via NPN ---
     if state_abbr in SOLAR_STATES:
