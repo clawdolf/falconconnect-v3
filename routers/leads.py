@@ -247,9 +247,9 @@ async def bulk_import_leads(
             created += 1
             logger.info("Bulk import — created: %s (Notion:%s, GHL:%s, Quo:%s)", lead_name, notion_page_id, ghl_contact_id or "SKIPPED", "yes" if quo_synced else "no")
 
-            # Rate limiting delay between GHL calls
+            # Minimal rate limiting delay between GHL calls (30ms is enough)
             if not req.dry_run and idx < len(req.leads) - 1:
-                await asyncio.sleep(0.1)
+                await asyncio.sleep(0.03)
 
         except Exception as exc:
             failed += 1

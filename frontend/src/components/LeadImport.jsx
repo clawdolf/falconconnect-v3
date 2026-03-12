@@ -127,7 +127,7 @@ function LeadImport() {
     for (const fq of fileQueue) { totalLeads += buildLeads(fq.parsedRows, fq.headers, columnMap, fq.vendor, fq.tier, fq.leadType, fq.leadAge, fq.purchaseDate).leads.length }
     setProgress({ current: 0, total: totalLeads, fileIndex: 0, fileName: fileQueue[0]?.name || '' })
     const authHdrs = await getAuthHeaders()
-    const BS = 100
+    const BS = 50  // smaller batches = smoother progress bar
     let grandCreated = 0, grandFailed = 0, grandDropped = 0, processedLeads = 0
     const grandErrors = [], grandGhlWarnings = []
     for (let fi = 0; fi < fileQueue.length; fi++) {
@@ -151,11 +151,11 @@ function LeadImport() {
         } catch { fileFailed += batch.length }
         processedLeads += batch.length
         setProgress(prev => ({ ...prev, current: Math.min(processedLeads, totalLeads) }))
-        if (i + BS < leads.length) await new Promise(r => setTimeout(r, 100))
+        // no artificial delay between batches — backend handles its own rate limiting
       }
       updateFileQueueItem(fi, { status: fileFailed > 0 && fileCreated === 0 ? 'error' : 'done', result: { created: fileCreated, failed: fileFailed, ghlWarnings: fileGhlWarnings, errors: fileErrors, droppedCount, droppedRows } })
       grandCreated += fileCreated; grandFailed += fileFailed; grandErrors.push(...fileErrors); grandGhlWarnings.push(...fileGhlWarnings)
-      if (fi + 1 < fileQueue.length) await new Promise(r => setTimeout(r, 200))
+      // no delay between files
     }
     setGrandResult({ created: grandCreated, failed: grandFailed, errors: grandErrors, ghlWarnings: grandGhlWarnings, droppedCount: grandDropped })
     setStep('results')
@@ -383,10 +383,13 @@ function LeadImport() {
             <p style={{ fontFamily: 'var(--font-mono)', fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: '1rem' }}>
               File {progress.fileIndex + 1}/{fileQueue.length}: {progress.fileName}
             </p>
-            <div className="progress-bar-container" style={{ marginBottom: '0.5rem' }}>
-              <div className="progress-bar" style={{ width: (progress.total > 0 ? (progress.current / progress.total * 100) : 0) + '%' }} />
+            <div className="progress-bar-container" style={{ marginBottom: '0.5rem', position: 'relative' }}>
+              <div className="progress-bar" style={{ width: (progress.total > 0 ? (progress.current / progress.total * 100) : 0) + '%', transition: 'width 0.25s ease' }} />
             </div>
-            <p className="progress-label">{progress.current} / {progress.total} leads</p>
+            <p className="progress-label">
+              {progress.current} / {progress.total} leads
+              {progress.total > 0 && <span style={{ marginLeft: '0.75rem', color: 'var(--accent)', fontWeight: 700 }}>{Math.round(progress.current / progress.total * 100)}%</span>}
+            </p>
             {fileQueue.filter(f => f.status === 'done').length > 0 && (
               <div style={{ marginTop: '1rem', textAlign: 'left' }}>
                 {fileQueue.map((fq, i) => fq.status === 'done' && fq.result ? (
