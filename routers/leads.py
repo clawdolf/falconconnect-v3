@@ -162,13 +162,16 @@ async def bulk_import_leads(
 
             # ── STEP 1: Notion FIRST (source of truth) ──
             # If Notion fails, skip this row entirely — do NOT write to GHL
+            notion_is_new = True
             try:
-                notion_page_id = await notion.upsert_lead(
+                notion_result = await notion.upsert_lead(
                     lead_dict,
                     ghl_contact_id="",  # Will be updated after GHL
                     age=age,
                     lage_months=lage_months,
                 )
+                notion_page_id = notion_result["page_id"]
+                notion_is_new = notion_result["is_new"]
             except Exception as exc:
                 # Notion failed → skip this row entirely
                 failed += 1
@@ -236,7 +239,7 @@ async def bulk_import_leads(
                 )
                 logger.warning("Bulk import — GHL failed for %s (in Notion): %s", lead_name, ghl_exc)
 
-            # BUG 7 FIX: No local DB writes (lead_xref/sync_log removed)
+            # No local DB writes (lead_xref/sync_log removed)
 
             # ── STEP 3: Quo THIRD (dialer sync) ──
             # Non-fatal — if Quo fails, lead is still in Notion + GHL
@@ -247,8 +250,12 @@ async def bulk_import_leads(
             except Exception as quo_exc:
                 logger.warning("Quo sync failed for %s (non-fatal): %s", lead_name, quo_exc)
 
-            created += 1
-            logger.info("Bulk import — created: %s (Notion:%s, GHL:%s, Quo:%s)", lead_name, notion_page_id, ghl_contact_id or "SKIPPED", "yes" if quo_synced else "no")
+            # Track created vs updated based on Notion's result
+            if notion_is_new:
+                created += 1
+            else:
+                updated += 1
+            logger.info("Bulk import — %s: %s (Notion:%s, GHL:%s, Quo:%s)", "created" if notion_is_new else "updated", lead_name, notion_page_id, ghl_contact_id or "SKIPPED", "yes" if quo_synced else "no")
 
             # Minimal rate limiting delay between GHL calls (30ms is enough)
             if not req.dry_run and idx < len(req.leads) - 1:
@@ -266,8 +273,8 @@ async def bulk_import_leads(
             logger.warning("Bulk import — failed %s: %s", lead_name, exc)
 
     logger.info(
-        "Bulk import complete: %d created, %d failed, %d GHL warnings out of %d",
-        created, failed, len(ghl_warnings), len(req.leads),
+        "Bulk import complete: %d created, %d updated, %d failed, %d GHL warnings out of %d",
+        created, updated, failed, len(ghl_warnings), len(req.leads),
     )
 
     return BulkImportResponse(
@@ -278,46 +285,6 @@ async def bulk_import_leads(
         errors=errors,
         ghl_warnings=ghl_warnings,
     )
-
-
-def _build_aggregate_comments(
-    ghl_id: str,
-    notes: Optional[str],
-    existing_comments: str = "",
-) -> str:
-    """Bug 7 fix: Merge GHL ID and notes with existing Aggregate Comments.
-
-    Format: GHL:{id} | {notes}
-    Never overwrite existing non-empty content with blank.
-    Preserves existing comments and appends new info.
-    """
-    new_base = f"GHL:{ghl_id}" if ghl_id else ""
-
-    if existing_comments:
-        # If GHL ID already in existing, preserve everything
-        if ghl_id and f"GHL:{ghl_id}" in existing_comments:
-            if notes and notes not in existing_comments:
-                return f"{existing_comments} | {notes}"[:2000]
-            return existing_comments
-        # If a different GHL ID exists, update it
-        elif "GHL:" in existing_comments and ghl_id:
-            import re
-            updated = re.sub(r"GHL:[^\s|]+", f"GHL:{ghl_id}", existing_comments, count=1)
-            if notes and notes not in updated:
-                return f"{updated} | {notes}"[:2000]
-            return updated
-        # No GHL ID yet — prepend
-        elif ghl_id:
-            result = f"GHL:{ghl_id} | {existing_comments}"
-            if notes and notes not in result:
-                result = f"{result} | {notes}"
-            return result[:2000]
-        else:
-            return existing_comments
-    else:
-        if notes:
-            return f"{new_base} | {notes}"[:2000]
-        return new_base
 
 
 # ── Single lead capture (kept for backwards compatibility) ──
@@ -356,12 +323,13 @@ async def capture_lead(
 
     # --- STEP 1: Notion FIRST ---
     try:
-        notion_page_id = await notion.upsert_lead(
+        notion_result = await notion.upsert_lead(
             lead_dict,
             ghl_contact_id="",
             age=age,
             lage_months=lage_months,
         )
+        notion_page_id = notion_result["page_id"]
     except Exception as exc:
         logger.error("Notion upsert_lead failed: %s", exc)
         raise HTTPException(
