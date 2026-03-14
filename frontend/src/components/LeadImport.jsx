@@ -27,6 +27,8 @@ function LeadImport() {
   const [testMode, setTestMode] = useState(false)
   const [grandResult, setGrandResult] = useState(null)
   const [previewTab, setPreviewTab] = useState(0)
+  const [perFileMaps, setPerFileMaps] = useState({})
+  const [mappingFileIdx, setMappingFileIdx] = useState(0)
 
   let getToken = null
   try { const { useAuth } = require('@clerk/clerk-react'); const auth = useAuth(); getToken = auth.getToken } catch {}
@@ -46,6 +48,7 @@ function LeadImport() {
     setColumnMap({}); setInitialAutoMap({}); setApplyMappingToAll(true); setMappingWarning('')
     setError(null); setGrandResult(null); setSheetUrl(''); setSheetLoading(false); setPreviewTab(0)
     setProgress({ current: 0, total: 0, fileIndex: 0, fileName: '' })
+    setPerFileMaps({}); setMappingFileIdx(0)
   }
 
   const parseOneFile = async (file) => {
@@ -121,10 +124,50 @@ function LeadImport() {
   const sortedHeaders = useMemo(() => [...headers].sort((a, b) => (columnMap[b] ? 1 : 0) - (columnMap[a] ? 1 : 0)), [headers, columnMap])
   const headerIndexMap = useMemo(() => { const m = {}; headers.forEach((h, i) => { m[h] = i }); return m }, [headers])
 
+  // Helper: check if two header arrays are identical
+  const headersMatch = (a, b) => a.length === b.length && a.every((h, i) => h === b[i])
+
+  // For per-file mapping: find groups of files with unique headers
+  const uniqueHeaderGroups = useMemo(() => {
+    if (fileQueue.length <= 1) return []
+    const groups = [] // [{fileIndices: [0,2], headers: [...]}]
+    fileQueue.forEach((fq, idx) => {
+      const existing = groups.find(g => headersMatch(g.headers, fq.headers))
+      if (existing) { existing.fileIndices.push(idx) }
+      else { groups.push({ fileIndices: [idx], headers: fq.headers }) }
+    })
+    return groups
+  }, [fileQueue])
+
+  // How many unique header sets need separate mapping?
+  const uniqueHeaderCount = uniqueHeaderGroups.length
+
+  // Get the effective column map for a given file index
+  const getMapForFile = (fi) => {
+    if (applyMappingToAll) return columnMap
+    return perFileMaps[fi] || columnMap
+  }
+
+  // Load headers for a specific file into the mapping UI
+  const loadFileForMapping = (fi) => {
+    const fq = fileQueue[fi]
+    if (!fq) return
+    setHeaders(fq.headers)
+    setSampleRow(fq.sampleRow)
+    const existingMap = perFileMaps[fi]
+    if (existingMap) {
+      setColumnMap(existingMap)
+    } else {
+      const autoMap = autoMapHeaders(fq.headers)
+      setColumnMap(autoMap)
+    }
+    setInitialAutoMap(autoMapHeaders(fq.headers))
+  }
+
   const doImport = async () => {
     setStep('importing'); setError(null)
     let totalLeads = 0
-    for (const fq of fileQueue) { totalLeads += buildLeads(fq.parsedRows, fq.headers, columnMap, fq.vendor, fq.tier, fq.leadType, fq.leadAge, fq.purchaseDate).leads.length }
+    for (let fi = 0; fi < fileQueue.length; fi++) { const fq = fileQueue[fi]; const map = getMapForFile(fi); totalLeads += buildLeads(fq.parsedRows, fq.headers, map, fq.vendor, fq.tier, fq.leadType, fq.leadAge, fq.purchaseDate).leads.length }
     setProgress({ current: 0, total: totalLeads, fileIndex: 0, fileName: fileQueue[0]?.name || '' })
     const authHdrs = await getAuthHeaders()
     const BS = 50  // smaller batches = smoother progress bar
@@ -132,9 +175,10 @@ function LeadImport() {
     const grandErrors = [], grandGhlWarnings = []
     for (let fi = 0; fi < fileQueue.length; fi++) {
       const fq = fileQueue[fi]
+      const fileMap = getMapForFile(fi)
       updateFileQueueItem(fi, { status: 'importing' })
       setProgress(prev => ({ ...prev, fileIndex: fi, fileName: fq.name }))
-      const { leads, droppedCount, droppedRows } = buildLeads(fq.parsedRows, fq.headers, columnMap, fq.vendor, fq.tier, fq.leadType, fq.leadAge, fq.purchaseDate)
+      const { leads, droppedCount, droppedRows } = buildLeads(fq.parsedRows, fq.headers, fileMap, fq.vendor, fq.tier, fq.leadType, fq.leadAge, fq.purchaseDate)
       grandDropped += droppedCount
       if (!leads.length) { updateFileQueueItem(fi, { status: 'done', result: { created: 0, failed: 0, ghlWarnings: [], droppedCount, droppedRows } }); continue }
       let fileCreated = 0, fileFailed = 0; const fileGhlWarnings = [], fileErrors = []
@@ -143,7 +187,7 @@ function LeadImport() {
         try {
           const resp = await fetch('/api/leads/bulk', { method: 'POST', headers: authHdrs, body: JSON.stringify({ leads: batch, dry_run: dryRun, test_mode: testMode }) })
           if (resp.ok) {
-            const d = await resp.json(); fileCreated += d.created || 0; fileFailed += d.failed || 0
+            const d = await resp.json(); fileCreated += (d.created || 0) + (d.updated || 0); fileFailed += d.failed || 0
             if (d.errors) fileErrors.push(...d.errors); if (d.ghl_warnings) fileGhlWarnings.push(...d.ghl_warnings)
           } else {
             for (const l of batch) { try { const r = await fetch('/api/leads/capture', { method: 'POST', headers: authHdrs, body: JSON.stringify(l) }); if (r.ok) fileCreated++; else fileFailed++ } catch { fileFailed++ } }
@@ -163,23 +207,64 @@ function LeadImport() {
 
   const goBack = () => {
     if (step === 'fileConfig') setStep(sourceType || 'source')
-    else if (step === 'mapping') setStep('fileConfig')
+    else if (step === 'mapping') {
+      if (!applyMappingToAll && mappingFileIdx > 0) {
+        // Go back to previous file group in per-file mapping
+        const prevIdx = mappingFileIdx - 1
+        setMappingFileIdx(prevIdx)
+        loadFileForMapping(uniqueHeaderGroups[prevIdx].fileIndices[0])
+      } else {
+        setMappingFileIdx(0)
+        setStep('fileConfig')
+      }
+    }
     else if (step === 'preview') setStep('mapping')
     else setStep('source')
   }
   const handleMappingNext = () => {
     if (!mappingOk) { setMappingWarning('Required: First Name (or Full Name), Last Name, and Phone must be mapped.'); return }
-    setMappingWarning(''); setStep('preview')
+    setMappingWarning('')
+
+    // Per-file mapping mode: cycle through unique header groups
+    if (!applyMappingToAll && fileQueue.length > 1 && uniqueHeaderCount > 1) {
+      // Save current mapping for all files sharing this header set
+      const currentGroup = uniqueHeaderGroups[mappingFileIdx]
+      if (currentGroup) {
+        const updated = { ...perFileMaps }
+        currentGroup.fileIndices.forEach(fi => { updated[fi] = { ...columnMap } })
+        setPerFileMaps(updated)
+      }
+
+      // Move to next unique header group
+      const nextIdx = mappingFileIdx + 1
+      if (nextIdx < uniqueHeaderCount) {
+        setMappingFileIdx(nextIdx)
+        const nextGroup = uniqueHeaderGroups[nextIdx]
+        const nextFileIdx = nextGroup.fileIndices[0]
+        loadFileForMapping(nextFileIdx)
+        return
+      }
+    }
+
+    // If apply-to-all is false but all files have same headers, store the single map for all
+    if (!applyMappingToAll && fileQueue.length > 1 && uniqueHeaderCount <= 1) {
+      const updated = {}
+      fileQueue.forEach((_, fi) => { updated[fi] = { ...columnMap } })
+      setPerFileMaps(updated)
+    }
+
+    setStep('preview')
   }
 
   const previewDataByFile = useMemo(() => {
     if (step !== 'preview') return []
-    return fileQueue.map(fq => {
-      const preview = buildLeads(fq.parsedRows.slice(0, 5), fq.headers, columnMap, fq.vendor, fq.tier, fq.leadType, fq.leadAge, fq.purchaseDate)
-      const full = buildLeads(fq.parsedRows, fq.headers, columnMap, fq.vendor, fq.tier, fq.leadType, fq.leadAge, fq.purchaseDate)
+    return fileQueue.map((fq, fi) => {
+      const map = getMapForFile(fi)
+      const preview = buildLeads(fq.parsedRows.slice(0, 5), fq.headers, map, fq.vendor, fq.tier, fq.leadType, fq.leadAge, fq.purchaseDate)
+      const full = buildLeads(fq.parsedRows, fq.headers, map, fq.vendor, fq.tier, fq.leadType, fq.leadAge, fq.purchaseDate)
       return { name: fq.name, previewLeads: preview.leads, totalLeads: full.leads.length, droppedCount: full.droppedCount, vendor: fq.vendor, tier: fq.tier, leadType: fq.leadType }
     })
-  }, [step, fileQueue, columnMap])
+  }, [step, fileQueue, columnMap, perFileMaps, applyMappingToAll])
   const totalLeadsAcrossFiles = useMemo(() => previewDataByFile.reduce((s, f) => s + f.totalLeads, 0), [previewDataByFile])
   const totalDroppedAcrossFiles = useMemo(() => previewDataByFile.reduce((s, f) => s + f.droppedCount, 0), [previewDataByFile])
 
@@ -290,10 +375,30 @@ function LeadImport() {
 
         {step === 'mapping' && (
           <div>
-            <p className="form-hint" style={{ marginBottom: '0.75rem' }}>Mapping columns from: <strong>{fileQueue[0]?.name}</strong> ({fileQueue[0]?.parsedRows.length} rows)</p>
+            {!applyMappingToAll && fileQueue.length > 1 && uniqueHeaderCount > 1 ? (
+              <p className="form-hint" style={{ marginBottom: '0.75rem' }}>
+                Mapping file group {mappingFileIdx + 1} of {uniqueHeaderCount}: <strong>{fileQueue[uniqueHeaderGroups[mappingFileIdx]?.fileIndices[0]]?.name}</strong>
+                {uniqueHeaderGroups[mappingFileIdx]?.fileIndices.length > 1 && (
+                  <span style={{ color: 'var(--text-muted)' }}> (+{uniqueHeaderGroups[mappingFileIdx].fileIndices.length - 1} file{uniqueHeaderGroups[mappingFileIdx].fileIndices.length > 2 ? 's' : ''} with same headers)</span>
+                )}
+              </p>
+            ) : (
+              <p className="form-hint" style={{ marginBottom: '0.75rem' }}>Mapping columns from: <strong>{fileQueue[0]?.name}</strong> ({fileQueue[0]?.parsedRows.length} rows)</p>
+            )}
             {fileQueue.length > 1 && (
               <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem', fontFamily: 'var(--font-mono)', fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-                <input type="checkbox" checked={applyMappingToAll} onChange={e => setApplyMappingToAll(e.target.checked)} />
+                <input type="checkbox" checked={applyMappingToAll} onChange={e => {
+                  setApplyMappingToAll(e.target.checked)
+                  if (e.target.checked) {
+                    // Switching back to apply-all: reset to first file's headers
+                    setMappingFileIdx(0); setPerFileMaps({})
+                    if (fileQueue.length > 0) { setHeaders(fileQueue[0].headers); setSampleRow(fileQueue[0].sampleRow); const autoMap = autoMapHeaders(fileQueue[0].headers); setColumnMap(autoMap); setInitialAutoMap({ ...autoMap }) }
+                  } else {
+                    // Switching to per-file: start at first unique header group
+                    setMappingFileIdx(0); setPerFileMaps({})
+                    if (uniqueHeaderCount > 1) { loadFileForMapping(uniqueHeaderGroups[0].fileIndices[0]) }
+                  }
+                }} />
                 Apply this mapping to all {fileQueue.length} files
               </label>
             )}
@@ -325,7 +430,9 @@ function LeadImport() {
               })}
             </div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1rem' }}>
-              <button className="btn btn-primary" onClick={handleMappingNext} disabled={!mappingOk}>Next {'\u2192'}</button>
+              <button className="btn btn-primary" onClick={handleMappingNext} disabled={!mappingOk}>
+                {!applyMappingToAll && uniqueHeaderCount > 1 && mappingFileIdx < uniqueHeaderCount - 1 ? 'Next file \u2192' : 'Next \u2192'}
+              </button>
             </div>
           </div>
         )}
