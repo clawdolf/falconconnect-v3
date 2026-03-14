@@ -47,6 +47,9 @@ class Settings(BaseSettings):
     notion_ghl_sync_after_date: str = "2026-03-03"
     notion_ghl_sync_interval: int = 300
 
+    # --- Quo (OpenPhone) ---
+    quo_api_key: str = ""
+
     # --- Plaid (Phase 2) ---
     plaid_client_id: str = ""
     plaid_secret: str = ""

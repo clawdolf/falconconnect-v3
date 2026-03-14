@@ -15,10 +15,11 @@ from typing import Dict, Any, List, Optional
 
 import httpx
 
+from config import get_settings
+
 logger = logging.getLogger("falconconnect.quo")
 
 QUO_BASE = "https://api.openphone.com/v1"
-QUO_API_KEY = "1kRWUvOQZkvGLfXeXA7xoQLJmc4j24Di"
 
 # Custom field keys — from Seb's working helper script
 CUSTOM_FIELDS_MAP = {
@@ -32,8 +33,9 @@ RATE_LIMIT_DELAY = 0.2
 
 
 def _headers() -> Dict[str, str]:
+    settings = get_settings()
     return {
-        "Authorization": QUO_API_KEY,
+        "Authorization": settings.quo_api_key,
         "Content-Type": "application/json",
     }
 
