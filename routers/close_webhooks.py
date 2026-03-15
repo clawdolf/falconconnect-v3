@@ -272,10 +272,10 @@ async def _process_appointment(
     phone = _extract_phone(contact)
 
     if not phone:
-        logger.error(
-            "No phone number on contact %s (lead %s)", contact_id, lead_id
+        logger.warning(
+            "No phone number on contact %s (lead %s) — skipping SMS, continuing with GCal",
+            contact_id, lead_id
         )
-        return {"status": "error", "reason": "no phone on contact"}
 
     # --- Check for rebooking — cancel old reminders/events if they exist ---
     async with _get_session_factory()() as session:
@@ -308,14 +308,16 @@ async def _process_appointment(
             await session.commit()
 
     # --- Step 1: Send SMS (confirmation + schedule reminders) ---
-    sms_results = await schedule_appointment_sms(
-        lead_id=lead_id,
-        contact_id=contact_id,
-        phone=phone,
-        first_name=first_name,
-        appointment_dt=appointment_dt,
-        tz_choice=tz_choice,
-    )
+    sms_results = None
+    if phone:
+        sms_results = await schedule_appointment_sms(
+            lead_id=lead_id,
+            contact_id=contact_id,
+            phone=phone,
+            first_name=first_name,
+            appointment_dt=appointment_dt,
+            tz_choice=tz_choice,
+        )
 
     # --- Step 2: Set up dummy email + GCal event ---
     dummy_email = f"lead-{lead_id}@appointments.falconfinancial.org"
