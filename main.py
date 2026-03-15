@@ -152,18 +152,20 @@ async def lifespan(app: FastAPI):
     await _seed_licenses_if_empty()
     await _dedup_licenses()
 
-    # Start background Notion → GHL sync loop
-    sync_task = asyncio.create_task(sync_loop())
-    logger.info("Notion→GHL background sync task started")
+    # Start background Notion → GHL sync loop (disabled 2026-03-15 — was blocking app startup)
+    # sync_task = asyncio.create_task(sync_loop())
+    # logger.info("Notion→GHL background sync task started")
+    sync_task = None  # placeholder for shutdown logic
 
     yield
 
     # Shutdown
-    sync_task.cancel()
-    try:
-        await sync_task
-    except asyncio.CancelledError:
-        pass
+    if sync_task:
+        sync_task.cancel()
+        try:
+            await sync_task
+        except asyncio.CancelledError:
+            pass
     logger.info("FalconConnect v3 shutting down …")
 
 
