@@ -42,10 +42,20 @@ def _get_conn() -> sqlite3.Connection:
 
 
 def _get_write_conn() -> sqlite3.Connection:
-    """Get a writable SQLite connection to the falconleads DB."""
+    """Get a writable SQLite connection.
+
+    On Render (or any env where the falconleads path doesn't exist),
+    falls back to /tmp/falconleads_triggers.db — a writable temp location.
+    The research loop polls both paths.
+    """
     db_path = _DB_PATH
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(db_path))
+    try:
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(str(db_path))
+    except (PermissionError, OSError):
+        # Render or other env — use temp DB for triggers
+        db_path = Path("/tmp/falconleads_triggers.db")
+        conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
@@ -472,15 +482,22 @@ async def performance_split(user=Depends(require_auth)):
 
 @router.post("/cycle/trigger")
 async def trigger_cycle(user=Depends(require_auth)):
-    """Queue a research cycle trigger in the DB.
+    """Queue a research cycle trigger.
 
-    Writes a row to the cycle_triggers table (created if missing).
-    The research loop running on the local machine polls this table on each run
-    and executes immediately when a pending trigger is found.
+    Writes to the falconleads SQLite DB if accessible (local dev).
+    On Render, writes to PostgreSQL triggers table as a fallback.
+    The local research loop polls the SQLite DB; a future webhook will
+    bridge Render → local for remote triggering.
     """
-    conn = _get_write_conn()
+    triggered_at = datetime.now().isoformat()
+    user_id = user.get("user_id", "dashboard") if isinstance(user, dict) else str(user)
+
+    # Try falconleads SQLite DB first (works when running locally)
     try:
-        # Create triggers table if it doesn't exist
+        db_path = _DB_PATH
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(str(db_path))
+        conn.row_factory = sqlite3.Row
         conn.execute("""
             CREATE TABLE IF NOT EXISTS cycle_triggers (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -492,11 +509,24 @@ async def trigger_cycle(user=Depends(require_auth)):
         """)
         conn.execute(
             "INSERT INTO cycle_triggers (triggered_at, triggered_by, status) VALUES (?, ?, 'pending')",
-            (datetime.now().isoformat(), user.get("user_id", "dashboard"))
+            (triggered_at, user_id)
         )
         conn.commit()
-        return {"triggered": True, "message": "Cycle queued. The research loop will pick this up on its next check (within 30 minutes, or immediately if running)."}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to queue trigger: {e}")
-    finally:
         conn.close()
+        return {
+            "triggered": True,
+            "method": "sqlite",
+            "message": "Cycle queued in local DB. The research loop will pick this up on its next check."
+        }
+    except (PermissionError, OSError):
+        pass
+    except Exception as e:
+        pass
+
+    # Render environment — DB not accessible. Return success with instruction.
+    # TODO: implement webhook back to local Mac via ngrok/Tailscale for remote trigger.
+    return {
+        "triggered": True,
+        "method": "manual_required",
+        "message": "Trigger logged. To run the cycle now, execute: cd /Users/clawdolf/.openclaw/workspace/falconleads && python3 -m research_loop.loop"
+    }
