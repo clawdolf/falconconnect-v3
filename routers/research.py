@@ -15,11 +15,16 @@ from middleware.auth import require_auth
 
 router = APIRouter()
 
-# ── DB path from falconleads config ──────────────────────────────────────────
-_FALCONLEADS_BASE = Path("/Users/clawdolf/.openclaw/workspace/falconleads")
-_DB_PATH = _FALCONLEADS_BASE / "data" / "falcon_campaigns.db"
-_PLAYBOOK_PATH = _FALCONLEADS_BASE / "research_loop" / "playbook.md"
-_TRIGGER_PATH = _FALCONLEADS_BASE / "research_loop" / ".trigger"
+# ── DB path — env var override for Render, fallback to Mac dev path ──────────
+_FALCONLEADS_BASE = Path(
+    os.environ.get("FALCONLEADS_BASE", "/Users/clawdolf/.openclaw/workspace/falconleads")
+)
+_DB_PATH = Path(
+    os.environ.get("FALCONLEADS_DB_PATH", str(_FALCONLEADS_BASE / "data" / "falcon_campaigns.db"))
+)
+_PLAYBOOK_PATH = Path(
+    os.environ.get("FALCONLEADS_PLAYBOOK_PATH", str(_FALCONLEADS_BASE / "research_loop" / "playbook.md"))
+)
 
 
 def _get_conn() -> sqlite3.Connection:
@@ -467,10 +472,31 @@ async def performance_split(user=Depends(require_auth)):
 
 @router.post("/cycle/trigger")
 async def trigger_cycle(user=Depends(require_auth)):
-    """Write a trigger file for the research loop to pick up on next run."""
+    """Queue a research cycle trigger in the DB.
+
+    Writes a row to the cycle_triggers table (created if missing).
+    The research loop running on the local machine polls this table on each run
+    and executes immediately when a pending trigger is found.
+    """
+    conn = _get_write_conn()
     try:
-        _TRIGGER_PATH.parent.mkdir(parents=True, exist_ok=True)
-        _TRIGGER_PATH.write_text(datetime.now().isoformat())
-        return {"triggered": True, "message": "Cycle queued for next run."}
+        # Create triggers table if it doesn't exist
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS cycle_triggers (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                triggered_at TEXT NOT NULL,
+                triggered_by TEXT,
+                status TEXT DEFAULT 'pending',
+                consumed_at TEXT
+            )
+        """)
+        conn.execute(
+            "INSERT INTO cycle_triggers (triggered_at, triggered_by, status) VALUES (?, ?, 'pending')",
+            (datetime.now().isoformat(), user.get("user_id", "dashboard"))
+        )
+        conn.commit()
+        return {"triggered": True, "message": "Cycle queued. The research loop will pick this up on its next check (within 30 minutes, or immediately if running)."}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to write trigger: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to queue trigger: {e}")
+    finally:
+        conn.close()
