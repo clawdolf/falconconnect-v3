@@ -2,15 +2,23 @@
 
 All data comes from the FalconLeads SQLite DB (separate from FalconConnect's
 PostgreSQL). Uses sqlite3 directly. Every query handles missing tables gracefully.
+
+Trigger endpoints use PostgreSQL (ResearchTrigger model) so the dashboard
+can queue cycles from Render while the Mac Mini poller reads them back.
 """
 
 import os
 import sqlite3
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query
+from sqlalchemy import select, func as sa_func
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from db.database import get_session
+from db.models import ResearchTrigger
 from middleware.auth import require_auth
 
 router = APIRouter()
@@ -87,10 +95,20 @@ def _rows_to_dicts(rows):
     return [dict(r) for r in rows] if rows else []
 
 
+def _verify_loop_token(x_loop_token: Optional[str]) -> None:
+    """Verify X-Loop-Token header against LOOP_SERVICE_TOKEN env var."""
+    expected = os.environ.get("LOOP_SERVICE_TOKEN", "")
+    if not expected or x_loop_token != expected:
+        raise HTTPException(status_code=401, detail="Invalid loop token.")
+
+
 # ── GET /status ──────────────────────────────────────────────────────────────
 
 @router.get("/status")
-async def research_status(user=Depends(require_auth)):
+async def research_status(
+    session: AsyncSession = Depends(get_session),
+    user=Depends(require_auth),
+):
     """Return research loop status: last cycle, totals, next scheduled run."""
     conn = _get_conn()
     try:
@@ -125,6 +143,14 @@ async def research_status(user=Depends(require_auth)):
             SELECT COUNT(*) as total FROM ads WHERE status = 'pending_approval'
         """, fetchone=True)
 
+        # Pending triggers count from PostgreSQL
+        pending_result = await session.execute(
+            select(sa_func.count(ResearchTrigger.id)).where(
+                ResearchTrigger.status == "pending"
+            )
+        )
+        pending_triggers = pending_result.scalar() or 0
+
         # Next Sunday midnight MST
         now = datetime.now()
         days_until_sunday = (6 - now.weekday()) % 7
@@ -141,6 +167,7 @@ async def research_status(user=Depends(require_auth)):
             "mutations_generated_total": _row_to_dict(mutations_row)["total"] if mutations_row else 0,
             "hypotheses_total": _row_to_dict(hypo_row)["total"] if hypo_row else 0,
             "winners_total": _row_to_dict(winners_row)["total"] if winners_row else 0,
+            "pending_triggers": pending_triggers,
         }
     finally:
         conn.close()
@@ -478,55 +505,73 @@ async def performance_split(user=Depends(require_auth)):
         conn.close()
 
 
-# ── POST /cycle/trigger ─────────────────────────────────────────────────────
+# ── POST /cycle/trigger — Queue a cycle via PostgreSQL ───────────────────────
 
 @router.post("/cycle/trigger")
-async def trigger_cycle(user=Depends(require_auth)):
-    """Queue a research cycle trigger.
-
-    Writes to the falconleads SQLite DB if accessible (local dev).
-    On Render, writes to PostgreSQL triggers table as a fallback.
-    The local research loop polls the SQLite DB; a future webhook will
-    bridge Render → local for remote triggering.
-    """
-    triggered_at = datetime.now().isoformat()
-    user_id = user.get("user_id", "dashboard") if isinstance(user, dict) else str(user)
-
-    # Try falconleads SQLite DB first (works when running locally)
-    try:
-        db_path = _DB_PATH
-        db_path.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(str(db_path))
-        conn.row_factory = sqlite3.Row
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS cycle_triggers (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                triggered_at TEXT NOT NULL,
-                triggered_by TEXT,
-                status TEXT DEFAULT 'pending',
-                consumed_at TEXT
-            )
-        """)
-        conn.execute(
-            "INSERT INTO cycle_triggers (triggered_at, triggered_by, status) VALUES (?, ?, 'pending')",
-            (triggered_at, user_id)
-        )
-        conn.commit()
-        conn.close()
-        return {
-            "triggered": True,
-            "method": "sqlite",
-            "message": "Cycle queued in local DB. The research loop will pick this up on its next check."
-        }
-    except (PermissionError, OSError):
-        pass
-    except Exception as e:
-        pass
-
-    # Render environment — DB not accessible. Return success with instruction.
-    # TODO: implement webhook back to local Mac via ngrok/Tailscale for remote trigger.
+async def trigger_cycle(
+    session: AsyncSession = Depends(get_session),
+    user=Depends(require_auth),
+):
+    """Queue a research cycle by writing to PostgreSQL. The local Mac Mini polls this."""
+    user_id = user.get("user_id", user.get("sub", "dashboard")) if isinstance(user, dict) else str(user)
+    trigger = ResearchTrigger(triggered_by=user_id, status="pending")
+    session.add(trigger)
+    await session.flush()
     return {
         "triggered": True,
-        "method": "manual_required",
-        "message": "Trigger logged. To run the cycle now, execute: cd /Users/clawdolf/.openclaw/workspace/falconleads && python3 -m research_loop.loop"
+        "trigger_id": trigger.id,
+        "message": "Cycle queued. The research engine will pick this up within 5 minutes.",
     }
+
+
+# ── GET /triggers/pending — Polled by Mac Mini loop ─────────────────────────
+
+@router.get("/triggers/pending")
+async def get_pending_triggers(
+    x_loop_token: str = Header(None, alias="X-Loop-Token"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Called by the local research loop to check for pending triggers.
+    Authenticated by X-Loop-Token header matching LOOP_SERVICE_TOKEN env var.
+    """
+    _verify_loop_token(x_loop_token)
+
+    result = await session.execute(
+        select(ResearchTrigger)
+        .where(ResearchTrigger.status == "pending")
+        .order_by(ResearchTrigger.triggered_at.asc())
+        .limit(1)
+    )
+    trigger = result.scalar_one_or_none()
+    if not trigger:
+        return {"pending": False}
+    return {
+        "pending": True,
+        "trigger_id": trigger.id,
+        "triggered_at": trigger.triggered_at.isoformat() if trigger.triggered_at else None,
+    }
+
+
+# ── POST /triggers/{trigger_id}/consume — Called after cycle runs ────────────
+
+@router.post("/triggers/{trigger_id}/consume")
+async def consume_trigger(
+    trigger_id: int,
+    body: dict = Body(default={}),
+    x_loop_token: str = Header(None, alias="X-Loop-Token"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Called by the local loop after successfully running a cycle."""
+    _verify_loop_token(x_loop_token)
+
+    result = await session.execute(
+        select(ResearchTrigger).where(ResearchTrigger.id == trigger_id)
+    )
+    trigger = result.scalar_one_or_none()
+    if not trigger:
+        raise HTTPException(status_code=404, detail="Trigger not found.")
+
+    trigger.status = "consumed"
+    trigger.consumed_at = datetime.now(timezone.utc)
+    trigger.cycle_id = body.get("cycle_id")
+    return {"consumed": True, "trigger_id": trigger_id}

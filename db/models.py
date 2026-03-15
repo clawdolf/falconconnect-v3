@@ -238,3 +238,17 @@ class CampaignVariant(Base):
     created_at: datetime = Column(DateTime(timezone=True), server_default=func.now())
 
     campaign = relationship("Campaign", back_populates="variants")
+
+
+class ResearchTrigger(Base):
+    """Research cycle trigger queue — written by dashboard, consumed by local loop."""
+
+    __tablename__ = "research_triggers"
+
+    id: int = Column(Integer, primary_key=True, autoincrement=True)
+    triggered_at: datetime = Column(DateTime(timezone=True), server_default=func.now())
+    triggered_by: str = Column(String(128), nullable=True)  # Clerk user_id
+    status: str = Column(String(16), default="pending", index=True)  # pending | consumed | cancelled
+    consumed_at: datetime = Column(DateTime(timezone=True), nullable=True)
+    cycle_id: str = Column(String(64), nullable=True)  # filled in by loop after run
+    notes: str = Column(Text, nullable=True)
