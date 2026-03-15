@@ -132,6 +132,69 @@ async def create_appointment_event(
         return None
 
 
+async def update_appointment_event(
+    event_id: str,
+    *,
+    summary: str | None = None,
+    description: str | None = None,
+    start_dt: datetime | None = None,
+    duration_minutes: int = 30,
+    calendar_id: str | None = None,
+) -> bool:
+    """Update an existing Google Calendar event.
+
+    Only updates the fields that are provided (non-None).
+    Returns True on success, False on failure.
+    """
+    import asyncio
+
+    settings = get_settings()
+    cal_id = calendar_id or settings.google_calendar_id
+
+    event_body: dict = {}
+
+    if summary is not None:
+        event_body["summary"] = summary
+
+    if description is not None:
+        event_body["description"] = description
+
+    if start_dt is not None:
+        end_dt = start_dt + timedelta(minutes=duration_minutes)
+        event_body["start"] = {
+            "dateTime": start_dt.isoformat(),
+            "timeZone": "UTC",
+        }
+        event_body["end"] = {
+            "dateTime": end_dt.isoformat(),
+            "timeZone": "UTC",
+        }
+
+    if not event_body:
+        logger.info("No fields to update for GCal event %s", event_id)
+        return True
+
+    try:
+        service = _get_calendar_service()
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(
+            None,
+            lambda: service.events()
+            .patch(
+                calendarId=cal_id,
+                eventId=event_id,
+                body=event_body,
+                sendUpdates="none",
+            )
+            .execute(),
+        )
+        logger.info("GCal event updated: %s", event_id)
+        return True
+    except Exception as exc:
+        logger.error("Failed to update GCal event %s: %s", event_id, exc)
+        return False
+
+
 async def delete_event(
     event_id: str,
     calendar_id: Optional[str] = None,

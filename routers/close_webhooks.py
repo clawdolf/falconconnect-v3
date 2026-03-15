@@ -46,13 +46,32 @@ from services.close_sms import (
     cancel_scheduled_sms,
     schedule_appointment_sms,
 )
-from services.google_calendar import create_appointment_event, delete_event
+from services.google_calendar import (
+    create_appointment_event,
+    delete_event,
+    update_appointment_event,
+)
 
 logger = logging.getLogger("falconconnect.close_webhooks")
 
 router = APIRouter()
 
 CLOSE_API_BASE = "https://api.close.com/api/v1"
+
+# Custom field ID for Appointment Length (choices: "15 min", "30 min", "60 min")
+CF_APPOINTMENT_LENGTH = "cf_BdxJMNDwJW0w9LeDm5mC3m6K7lPdu4XBtgaYEdiB433"
+
+# Map appointment length choice to minutes
+DURATION_MAP: dict[str | None, int] = {
+    "15 min": 15,
+    "30 min": 30,
+    "60 min": 60,
+}
+DEFAULT_DURATION_MINUTES = 60
+
+# Timezones where early-morning UTC times likely indicate AM/PM confusion
+AM_PM_CONFUSION_TIMEZONES = {"AZ", "MT", "PT"}
+AM_PM_CONFUSION_UTC_HOUR_MAX = 6  # 00:00-06:00 UTC
 
 
 # ---------------------------------------------------------------------------
@@ -243,9 +262,24 @@ async def _process_appointment(
         )
         return {"status": "error", "reason": f"invalid datetime: {appointment_dt_str}"}
 
-    # Get timezone choice and notes from custom fields (flat "custom.cf_XXX" keys)
+    # Get timezone choice, notes, and appointment length from custom fields
     tz_choice = activity_data.get(f"custom.{CF_APPOINTMENT_TIMEZONE}")
     notes = activity_data.get(f"custom.{CF_APPOINTMENT_NOTES}", "")
+    length_choice = activity_data.get(f"custom.{CF_APPOINTMENT_LENGTH}")
+    duration_minutes = DURATION_MAP.get(length_choice, DEFAULT_DURATION_MINUTES)
+
+    # --- AM/PM confusion warning (Task 3) ---
+    # If time is between 00:00-06:00 UTC and timezone is AZ/MT/PT,
+    # the time is very late at night / early morning local — likely AM/PM mix-up
+    utc_hour = appointment_dt.hour
+    tz_abbrev = (tz_choice or "").strip().split("(")[0].strip().split()[0].upper() if tz_choice else ""
+    if utc_hour < AM_PM_CONFUSION_UTC_HOUR_MAX and tz_abbrev in AM_PM_CONFUSION_TIMEZONES:
+        logger.warning(
+            "Appointment time may be AM/PM confusion — %s in %s (lead %s)",
+            appointment_dt.isoformat(),
+            tz_choice,
+            lead_id,
+        )
 
     # Resolve contact_id — try activity data first, then look up from lead
     contact_id = activity_data.get("contact_id")
@@ -324,17 +358,18 @@ async def _process_appointment(
     existing_emails = contact.get("emails", [])
     await _patch_contact_add_calendar_email(contact_id, dummy_email, existing_emails)
 
-    # Create Google Calendar event
+    # Create Google Calendar event (duration from appointment length field)
     gcal_event_id = await create_appointment_event(
         summary=f"Call with {contact_name or lead_id}",
         description=(
             f"Close Lead: {lead_id}\n"
             f"Contact: {contact_name}\n"
             f"Phone: {phone}\n"
+            f"Duration: {duration_minutes} min\n"
             f"{f'Notes: {notes}' if notes else ''}"
         ),
         start_dt=appointment_dt,
-        duration_minutes=30,
+        duration_minutes=duration_minutes,
         attendee_email=dummy_email,
     )
 
@@ -390,6 +425,73 @@ async def _process_appointment(
         "sms": sms_results,
         "gcal_event_id": gcal_event_id,
         "dummy_email": dummy_email,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Appointment deletion handler
+# ---------------------------------------------------------------------------
+
+async def _handle_appointment_deleted(lead_id: str) -> dict:
+    """Handle a deleted/voided appointment activity.
+
+    Cancels pending SMS reminders, deletes GCal event, and marks
+    appointment records as cancelled.
+    """
+    cancelled_sms = 0
+    deleted_gcal = 0
+
+    async with _get_session_factory()() as session:
+        result = await session.execute(
+            select(AppointmentReminder).where(
+                AppointmentReminder.lead_id == lead_id,
+                AppointmentReminder.status == "active",
+            )
+        )
+        active_reminders = result.scalars().all()
+
+        if not active_reminders:
+            logger.info(
+                "No active appointment reminders found for deleted lead %s",
+                lead_id,
+            )
+            return {"status": "skipped", "reason": "no active reminders to cancel"}
+
+        for reminder in active_reminders:
+            # Cancel scheduled SMS reminders
+            for sms_id in [
+                reminder.sms_id_24hr,
+                reminder.sms_id_1hr,
+            ]:
+                if sms_id:
+                    success = await cancel_scheduled_sms(sms_id)
+                    if success:
+                        cancelled_sms += 1
+
+            # Delete GCal event
+            if reminder.gcal_event_id:
+                success = await delete_event(reminder.gcal_event_id)
+                if success:
+                    deleted_gcal += 1
+
+            # Mark as cancelled
+            reminder.status = "cancelled"
+
+        await session.commit()
+
+    logger.info(
+        "Appointment deleted for lead %s: cancelled %d SMS, deleted %d GCal events",
+        lead_id,
+        cancelled_sms,
+        deleted_gcal,
+    )
+
+    return {
+        "status": "ok",
+        "action": "deleted",
+        "lead_id": lead_id,
+        "cancelled_sms": cancelled_sms,
+        "deleted_gcal_events": deleted_gcal,
     }
 
 
@@ -453,7 +555,7 @@ async def close_webhook(request: Request):
         lead_id,
     )
 
-    # Only process custom activity created/updated events
+    # Only process custom activity events
     if object_type != "activity.custom_activity":
         logger.debug(
             "Ignoring webhook — object_type %s (not activity.custom_activity)",
@@ -461,8 +563,8 @@ async def close_webhook(request: Request):
         )
         return {"status": "skipped", "reason": f"object_type: {object_type}"}
 
-    if action not in ("created", "updated"):
-        logger.debug("Ignoring webhook — action %s (not created/updated)", action)
+    if action not in ("created", "updated", "deleted"):
+        logger.debug("Ignoring webhook — action %s (not created/updated/deleted)", action)
         return {"status": "skipped", "reason": f"action: {action}"}
 
     # Check this is our Book Appointment activity type
@@ -484,6 +586,29 @@ async def close_webhook(request: Request):
         logger.error("No lead_id in webhook event")
         return {"status": "error", "reason": "no lead_id"}
 
-    # Process the appointment
+    # --- Handle DELETE ---
+    if action == "deleted":
+        result = await _handle_appointment_deleted(lead_id)
+        return result
+
+    # --- Handle UPDATE with datetime change (reschedule) ---
+    if action == "updated":
+        changed_fields = event.get("changed_fields", [])
+        datetime_field_key = f"custom.{CF_APPOINTMENT_DATETIME}"
+        tz_field_key = f"custom.{CF_APPOINTMENT_TIMEZONE}"
+        length_field_key = f"custom.{CF_APPOINTMENT_LENGTH}"
+
+        # If appointment datetime, timezone, or length changed → reschedule
+        if any(f in changed_fields for f in (datetime_field_key, tz_field_key, length_field_key)):
+            logger.info(
+                "Reschedule detected for lead %s — changed_fields: %s",
+                lead_id,
+                changed_fields,
+            )
+            # _process_appointment already handles rebooking (cancels old, creates new)
+            result = await _process_appointment(event_data, lead_id)
+            return result
+
+    # --- Handle CREATE or non-datetime UPDATE ---
     result = await _process_appointment(event_data, lead_id)
     return result
