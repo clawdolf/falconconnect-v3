@@ -15,11 +15,12 @@
 // ═══════════════════════════════════════════════
 
 export const VENDOR_TIERS = {
-  'HOFLeads':      ['Diamond', 'Gold', 'Silver'],
-  'Proven Leads':  ['N/A'],
-  'Aria Leads':    ['Gold', 'Silver', 'N/A'],
-  'MilMo':         ['Gold', 'Silver', 'N/A'],
-  'Cheryl':        ['T1', 'T2', 'T3', 'T4', 'T5'],
+  'HOFLeads':       ['Diamond', 'Gold', 'Silver'],
+  'Proven Leads':   ['N/A'],
+  'Aria Leads':     ['Gold', 'Silver', 'N/A'],
+  'StrongPoint':    ['N/A'],
+  'MilMo':          ['Gold', 'Silver', 'N/A'],
+  'Cheryl':         ['T1', 'T2', 'T3', 'T4', 'T5'],
 }
 
 export const NEEDS_LEAD_AGE = {
@@ -32,14 +33,14 @@ export const NEEDS_LEAD_AGE = {
 
 export const VENDOR_AGE_BUCKETS = {
   'HOFLeads':      [],
-  'Proven Leads':  ['3M', '6M', '7\u201312M', '13\u201324M', '25\u201336M', '37\u201348M', '49\u201360M', '60+M'],
-  'Aria Leads':    ['7\u201312M', '13\u201324M', '25\u201336M', '37\u201348M', '49\u201360M', '60+M'],
-  'MilMo':         ['7\u201312M', '13\u201324M', '25\u201336M', '37\u201348M', '49\u201360M', '60+M'],
+  'Proven Leads':  ['3M', '6M', '7-12M', '13-24M', '25-36M', '37-48M', '49-60M', '60+M'],
+  'Aria Leads':    ['7-12M', '13-24M', '25-36M', '37-48M', '49-60M', '60+M'],
+  'MilMo':         ['7-12M', '13-24M', '25-36M', '37-48M', '49-60M', '60+M'],
   'Cheryl':        ['T1', 'T2', 'T3', 'T4', 'T5'],
 }
 
 /** Legacy fallback — kept for any code that imported LEAD_AGE_BUCKETS directly */
-export const LEAD_AGE_BUCKETS = ['7\u201312M', '13\u201324M', '25\u201336M', '37\u201348M', '49\u201360M', '60+M']
+export const LEAD_AGE_BUCKETS = ['7-12M', '13-24M', '25-36M', '37-48M', '49-60M', '60+M']
 
 
 // ═══════════════════════════════════════════════
@@ -87,7 +88,7 @@ export const LEAD_FIELDS = [
   // Lead metadata
   { value: 'lead_source', label: 'Lead Source' },
   { value: 'lead_type', label: 'Lead Type' },
-  { value: 'lead_age_bucket', label: 'Lead Age Bucket' },
+  { value: 'lead_age_bucket', label: 'Lead Age' },
   { value: 'lpd', label: 'Lead Purchase Date (LPD)' },
   { value: 'lead_received', label: 'Lead Received Date' },
   { value: 'vendor_lead_id', label: 'Vendor Lead ID' },
@@ -173,7 +174,7 @@ export const COLUMN_ALIASES = {
   'vendor': 'lead_source',
   'type': 'lead_type', 'lead type': 'lead_type', 'lead_type': 'lead_type',
   'lead age': 'lead_age_bucket', 'lead_age': 'lead_age_bucket',
-  'lead_age_bucket': 'lead_age_bucket',
+  'lead_age_bucket': 'lead_age_bucket', 'lage': 'lead_age_bucket',
 
   // ── Money / Lender ──
   'lender': 'lender', 'mortgage company': 'lender', 'bank': 'lender', 'servicer': 'lender',
@@ -304,11 +305,11 @@ export function autoDetectVendor(filename) {
   // Auto-detect lead age from filename (e.g. "proven_3m_batch.csv", "leads-6m.csv", "24-36m_list.xlsx")
   // Order matters: check range patterns before single values
   const ageMap = [
-    { pattern: /\b(49[-–_]?60\s*m)\b/,  value: '49–60M' },
-    { pattern: /\b(37[-–_]?48\s*m)\b/,  value: '37–48M' },
-    { pattern: /\b(25[-–_]?36\s*m)\b/,  value: '25–36M' },
-    { pattern: /\b(13[-–_]?24\s*m)\b/,  value: '13–24M' },
-    { pattern: /\b(7[-–_]?12\s*m)\b/,   value: '7–12M'  },
+    { pattern: /\b(49[-–_]?60\s*m)\b/,  value: '49-60M' },
+    { pattern: /\b(37[-–_]?48\s*m)\b/,  value: '37-48M' },
+    { pattern: /\b(25[-–_]?36\s*m)\b/,  value: '25-36M' },
+    { pattern: /\b(13[-–_]?24\s*m)\b/,  value: '13-24M' },
+    { pattern: /\b(7[-–_]?12\s*m)\b/,   value: '7-12M'  },
     { pattern: /\b60\+?\s*m\b/,          value: '60+M'   },
     { pattern: /\b3\s*m\b/,              value: '3M'     },
     { pattern: /\b6\s*m\b/,              value: '6M'     },
@@ -407,9 +408,13 @@ export function buildLeads(rows, headers, columnMap, vendor, tier, leadType, lea
     headers.forEach((h, i) => {
       const field = columnMap[h]
       if (field && row[i] !== undefined && row[i] !== null && String(row[i]).trim()) {
-        // Normalize boolean fields from CSV strings
-        if (['tobacco', 'medical', 'spanish'].includes(field)) {
-          lead[field] = ['true','1','yes','y','x','si','sí'].includes(String(row[i]).trim().toLowerCase())
+        // Normalize choice fields for Close.com (Yes/No strings, not booleans)
+        if (['tobacco', 'spanish'].includes(field)) {
+          const v = String(row[i]).trim().toLowerCase()
+          lead[field] = ['true','1','yes','y','x','si','sí'].includes(v) ? 'Yes' : 'No'
+        } else if (field === 'medical') {
+          // Medical Issues is a text field in Close — keep raw value
+          lead[field] = String(row[i]).trim()
         } else if (DATE_FIELDS.includes(field)) {
           // Date fields: normalize from raw value (handles Date objects, serial numbers, strings)
           lead[field] = normalizeDateValue(row[i])
@@ -426,6 +431,14 @@ export function buildLeads(rows, headers, columnMap, vendor, tier, leadType, lea
       lead.first_name = parts[0] || ''
       lead.last_name = parts.slice(1).join(' ') || parts[0] || ''
       delete lead.full_name
+    }
+
+    // Normalize gender to Close.com choices (M/F)
+    if (lead.gender) {
+      const g = String(lead.gender).trim().toLowerCase()
+      if (g === 'male' || g === 'm') lead.gender = 'M'
+      else if (g === 'female' || g === 'f') lead.gender = 'F'
+      else delete lead.gender  // Close only accepts M or F
     }
 
     // Phone fallback: if phone not mapped directly, promote mobile_phone or home_phone
