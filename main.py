@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from db.database import init_db
-from routers import leads, webhooks, calendar, analytics, admin, sync, licenses, agents, campaigns, ad_leads
+from routers import leads, webhooks, calendar, analytics, admin, sync, licenses, agents, campaigns, ad_leads, close_webhooks
 from routers.sheets import router as sheets_router
 from services.notion_ghl_sync import sync_loop
 
@@ -289,6 +289,7 @@ app.include_router(agents.router, prefix="/api/public", tags=["Agents"])
 app.include_router(ad_leads.router, prefix="/api/public", tags=["Ad Leads"])
 app.include_router(sheets_router, prefix="/api/sheets", tags=["Sheets"])
 app.include_router(campaigns.router, prefix="/api/campaigns", tags=["Campaigns"])
+app.include_router(close_webhooks.router, prefix="/webhooks", tags=["Close Webhooks"])
 from routers import research
 app.include_router(research.router, prefix="/api/research", tags=["Research"])
 

@@ -159,6 +159,39 @@ class DBLicense(Base):
     )
 
 
+class AppointmentReminder(Base):
+    """Tracks scheduled SMS reminders and GCal events for Close appointments."""
+
+    __tablename__ = "appointment_reminders"
+
+    id: int = Column(Integer, primary_key=True, autoincrement=True)
+    lead_id: str = Column(String(128), nullable=False, index=True)
+    contact_id: str = Column(String(128), nullable=False)
+    appointment_datetime: datetime = Column(DateTime(timezone=True), nullable=False)
+    sms_id_confirmation: str = Column(String(128), nullable=True)
+    sms_id_24hr: str = Column(String(128), nullable=True)
+    sms_id_1hr: str = Column(String(128), nullable=True)
+    gcal_event_id: str = Column(String(256), nullable=True)
+    status: str = Column(String(32), default="active", index=True)  # active | cancelled | rebooked
+    created_at: datetime = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at: datetime = Column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class AppointmentCalendarEmail(Base):
+    """Maps Close leads to dummy calendar emails for GCal ↔ Close linking."""
+
+    __tablename__ = "appointment_calendar_emails"
+
+    id: int = Column(Integer, primary_key=True, autoincrement=True)
+    lead_id: str = Column(String(128), nullable=False, unique=True, index=True)
+    contact_id: str = Column(String(128), nullable=False)
+    dummy_email: str = Column(String(256), nullable=False, unique=True)
+    gcal_event_id: str = Column(String(256), nullable=True)
+    created_at: datetime = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class Campaign(Base):
     """Ad campaigns — tracks Meta Ads campaigns for lead generation."""
 
