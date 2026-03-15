@@ -25,13 +25,12 @@ CF_UTM_CONTENT = "cf_5NFr6MwVguhV9vKa9d4rMxRy7ybWLxbaaSHMl1Wux8L"
 CF_AD_PLATFORM = "cf_kjMHO5vxvfqDEN0i9xmkRIBM5h74YhfTnW900ckdGqq"
 CF_LEAD_FORM_VARIANT = "cf_TLZpT49XI24ub6XkvteT34yCb9Gzgcozq8UEuRnZ5MO"
 
-# Existing standard fields
-CF_LEAD_SOURCE = "cf_q6RrzuQj49ewO4h9OTqzXKxOe1tovnhq1SivMgkW1wh"
-CF_LEAD_TYPE = "cf_WrHtEGzfvu5NVYQ6kwRih1MjUKGKYdeWPPVlpcj7tWq"
-CF_STATE = "cf_TuSvZiC8f3jN6KyaSNnRDyNzayCeoz2BzQfs8rJDrxp"
+# Existing Lead-level fields (verified 2026-03-14 via Close API)
+CF_LEAD_SOURCE = "cf_7ad3Cfpj2UDg5dEjJ6LDe9P5FZP8GcCyhaGSWZphACl"
+CF_LEAD_TYPE = "cf_5ZUUaAXocXSvGYmx0ySscbuoiZ0RqMgOixu6Bgg0v7Q"
 CF_AGE = "cf_ybSEF2RZgNHTRRa2vTJFQ7F1rIODCaXTXiL4zFtXx9S"
-CF_ZIP_CODE = "cf_WQXb3aBm9i3Be4Hd4IwsONVD5Ler5YWBtvTOC6jRGkV"
 CF_LEAD_AGE = "cf_WT1Jlj8IpKxVLFZnhqneIuAbocsWyV7dgn8WQJR0OFg"
+# NOTE: State, ZIP Code are Contact-level fields — NOT settable on Lead objects
 
 # Pipeline / Status IDs
 PIPELINE_INSURANCE = "pipe_2c85uCuww6T1Hps2npd2es"
@@ -113,8 +112,7 @@ async def create_lead(
     # Standard fields
     custom[CF_LEAD_SOURCE] = lead_source
     custom[CF_LEAD_TYPE] = lead_type
-    if state:
-        custom[CF_STATE] = state
+    # State is a Contact-level field — set it below on the contact object, not here
     if age is not None:
         custom[CF_AGE] = age
     # Lead Age is auto-populated by Close based on creation time — don't set it manually
