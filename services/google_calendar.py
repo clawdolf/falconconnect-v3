@@ -1,16 +1,15 @@
-"""Google Calendar service — creates/deletes events via Service Account.
+"""Google Calendar service — creates/deletes events via OAuth refresh token.
 
-Uses google-auth + google-api-python-client with a service account
-for server-to-server auth (no OAuth browser flow needed).
+Uses google-auth + google-api-python-client with a stored OAuth refresh token
+for server-to-server access to Seb's Google Calendar.
 
 Setup:
 1. Create Google Cloud project → enable Calendar API
-2. Create Service Account → download JSON key
-3. Share Seb's Google Calendar with service account email (editor)
-4. Set GOOGLE_SERVICE_ACCOUNT_JSON env var = JSON key contents
+2. Create OAuth 2.0 Desktop App credentials
+3. Run one-time auth flow to get refresh token
+4. Set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN env vars
 """
 
-import json
 import logging
 from datetime import datetime, timedelta
 from typing import Optional
@@ -23,29 +22,26 @@ logger = logging.getLogger("falconconnect.gcal")
 def _get_calendar_service():
     """Build and return an authenticated Google Calendar API service.
 
+    Uses OAuth refresh token — no browser flow needed at runtime.
     Raises RuntimeError if credentials are not configured.
     """
-    from google.oauth2 import service_account
+    from google.oauth2.credentials import Credentials
     from googleapiclient.discovery import build
 
     settings = get_settings()
-    sa_json = settings.google_service_account_json
 
-    if not sa_json:
+    if not settings.google_refresh_token:
         raise RuntimeError(
-            "GOOGLE_SERVICE_ACCOUNT_JSON not configured — "
+            "GOOGLE_REFRESH_TOKEN not configured — "
             "cannot access Google Calendar"
         )
 
-    try:
-        creds_info = json.loads(sa_json)
-    except json.JSONDecodeError as exc:
-        raise RuntimeError(
-            f"GOOGLE_SERVICE_ACCOUNT_JSON is not valid JSON: {exc}"
-        ) from exc
-
-    credentials = service_account.Credentials.from_service_account_info(
-        creds_info,
+    credentials = Credentials(
+        token=None,
+        refresh_token=settings.google_refresh_token,
+        token_uri="https://oauth2.googleapis.com/token",
+        client_id=settings.google_client_id,
+        client_secret=settings.google_client_secret,
         scopes=["https://www.googleapis.com/auth/calendar"],
     )
 

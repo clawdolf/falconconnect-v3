@@ -57,6 +57,9 @@ class Settings(BaseSettings):
     # --- Google Calendar (Service Account) ---
     google_service_account_json: str = ""
     google_calendar_id: str = "primary"
+    google_client_id: str = ""
+    google_client_secret: str = ""
+    google_refresh_token: str = ""
 
     # --- Quo (OpenPhone) ---
     quo_api_key: str = ""
