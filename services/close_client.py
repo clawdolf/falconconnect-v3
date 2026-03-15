@@ -117,8 +117,7 @@ async def create_lead(
         custom[CF_STATE] = state
     if age is not None:
         custom[CF_AGE] = age
-    # Lead Age = "New" for ad leads (just captured)
-    custom[CF_LEAD_AGE] = "New"
+    # Lead Age is auto-populated by Close based on creation time — don't set it manually
 
     # UTM attribution
     if utm_source is not None:

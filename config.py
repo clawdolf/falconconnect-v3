@@ -19,6 +19,7 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         # Always read from real environment — env vars override .env file
         env_ignore_empty=False,
+        extra="ignore",
     )
 
     # --- GHL ---
