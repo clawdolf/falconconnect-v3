@@ -120,6 +120,7 @@ async def _get_contact_details(contact_id: str) -> Optional[dict]:
     """Fetch contact details from Close API."""
     settings = get_settings()
     api_key = settings.close_api_key
+    logger.info("CLOSE_API_KEY loaded: %s", f"{api_key[:8]}...{api_key[-4:]}" if api_key else "EMPTY")
     if not api_key:
         return None
 
@@ -129,6 +130,7 @@ async def _get_contact_details(contact_id: str) -> Optional[dict]:
                 f"{CLOSE_API_BASE}/contact/{contact_id}/",
                 auth=(api_key, ""),
             )
+            logger.info("Close API contact fetch status: %s", resp.status_code)
             resp.raise_for_status()
             return resp.json()
     except Exception as exc:
