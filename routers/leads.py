@@ -1,9 +1,7 @@
-"""Lead capture & bulk import — Notion first (source of truth), then GHL (automations).
+"""Lead capture & bulk import.
 
-Business logic (locked decisions):
-1. Write to Notion FIRST — if Notion fails, skip that row entirely (do NOT write to GHL).
-2. Write to GHL SECOND — if GHL fails, log as warning but count lead as successfully imported.
-3. NO local DB writes — lead_xref and sync_log are not used in the import flow.
+Bulk import writes to Close.com (primary CRM).
+Single capture (capture_lead) still writes to Notion → GHL (separate migration).
 """
 
 import asyncio
@@ -16,7 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, field_validator
 
 from middleware.auth import require_auth
-from services import ghl, notion, quo
+from services import close, ghl, notion, quo
 from services.ghl import normalize_phone, split_phone_field
 from utils.age import calculate_age, calculate_lage
 
@@ -90,23 +88,13 @@ class BulkImportError(BaseModel):
     lead_name: Optional[str] = None
 
 
-class GHLWarning(BaseModel):
-    """Warning when a lead was saved to Notion but GHL failed."""
-
-    index: int
-    lead_name: str
-    error: str
-
-
 class BulkImportResponse(BaseModel):
     """Response from bulk lead import."""
 
     created: int
     updated: int = 0
     failed: int
-    quo_synced: int = 0
     errors: List[BulkImportError]
-    ghl_warnings: List[GHLWarning] = []
 
 
 # BUG 11 FIX: Moved from /api/public/leads/bulk to /api/leads/bulk (requires auth)
@@ -119,22 +107,19 @@ async def bulk_import_leads(
     req: BulkImportRequest,
     user=Depends(require_auth),
 ) -> BulkImportResponse:
-    """Bulk import leads — Notion first (source of truth), then GHL (automations).
+    """Bulk import leads — writes directly to Close.com (primary CRM).
 
-    Write order:
-    1. Notion FIRST — if Notion fails, skip the row entirely
-    2. GHL SECOND — if GHL fails, log warning but count as success (it's in Notion)
-    3. NO local DB writes — lead_xref/sync_log removed from import flow
+    Write order per lead:
+    1. Close.com create_lead — if fails, count as failed + skip
+    2. If notes present, add_note — non-fatal
+    3. Track created count
 
     Processes each lead individually so partial failures don't block the batch.
-    100ms delay between GHL API calls to avoid rate limiting.
+    300ms delay between Close API calls to respect rate limits.
     """
     created = 0
-    updated = 0
     failed = 0
-    quo_synced = 0
     errors: List[BulkImportError] = []
-    ghl_warnings: List[GHLWarning] = []
 
     for idx, item in enumerate(req.leads):
         lead_name = f"{item.first_name} {item.last_name}"
@@ -146,120 +131,47 @@ async def bulk_import_leads(
                 lead_dict["tier"] = "TEST"
                 lead_dict["lead_source"] = f"[TEST] {lead_dict.get('lead_source') or 'FC v3'}"
 
-            # Calculate derived fields
-            age = calculate_age(item.birth_year) if item.birth_year else None
-            lage_months = None
-            if item.mail_date:
-                try:
-                    lage_months = calculate_lage(item.mail_date)
-                except Exception:
-                    pass
-
             # Dry run — validate only, skip all external writes
             if req.dry_run:
                 created += 1
                 continue
 
-            # ── STEP 1: Notion FIRST (source of truth) ──
-            # If Notion fails, skip this row entirely — do NOT write to GHL
-            notion_is_new = True
+            # ── STEP 1: Close.com (primary CRM) ──
+            # If Close fails, count as failed and skip
             try:
-                notion_result = await notion.upsert_lead(
-                    lead_dict,
-                    ghl_contact_id="",  # Will be updated after GHL
-                    age=age,
-                    lage_months=lage_months,
-                )
-                notion_page_id = notion_result["page_id"]
-                notion_is_new = notion_result["is_new"]
+                close_result = await close.create_lead(lead_dict)
+                close_lead_id = close_result["id"]
             except Exception as exc:
-                # Notion failed → skip this row entirely
                 failed += 1
                 errors.append(
                     BulkImportError(
                         index=idx,
-                        error=f"Notion write failed: {exc}",
+                        error=f"Close.com write failed: {exc}",
                         lead_name=lead_name,
                     )
                 )
-                logger.warning("Bulk import — Notion failed for %s: %s", lead_name, exc)
+                logger.warning("Bulk import — Close failed for %s: %s", lead_name, exc)
                 continue
 
-            # ── STEP 2: GHL SECOND (automations only) ──
-            # If GHL fails, log warning but count as success (lead is in Notion)
-            ghl_contact_id = ""
-            try:
-                ghl_contact = await ghl.upsert_contact(lead_dict, test_mode=req.test_mode)
-                ghl_contact_id = ghl_contact.get("id", "")
-
-                # Create GHL opportunity
+            # ── STEP 2: Add note if present (non-fatal) ──
+            if item.notes:
                 try:
-                    opp_name = (
-                        f"{item.first_name} {item.last_name} — "
-                        f"{item.lead_source or 'bulk-import'}"
-                    )
-                    await ghl.create_opportunity(
-                        ghl_contact_id,
-                        stage_name="New Lead",
-                        name=opp_name,
-                    )
-                except Exception as opp_exc:
+                    await close.add_note(close_lead_id, item.notes)
+                except Exception as note_exc:
                     logger.warning(
-                        "GHL opp creation failed for %s (non-fatal): %s",
-                        lead_name, opp_exc,
+                        "Close note failed for %s (non-fatal): %s",
+                        lead_name, note_exc,
                     )
 
-                # Update Notion with GHL contact ID → write to "GHL ID" field (bare ID, no prefix)
-                if ghl_contact_id:
-                    try:
-                        props: dict = {
-                            "GHL ID": {
-                                "rich_text": [{"text": {"content": ghl_contact_id}}]
-                            }
-                        }
-                        # Write notes to Aggregate Comments separately if present
-                        if item.notes:
-                            existing_comments = await notion._read_aggregate_comments(notion_page_id)
-                            merged = item.notes if not existing_comments else f"{existing_comments} | {item.notes}"
-                            props["Aggregate Comments"] = {
-                                "rich_text": [{"text": {"content": merged}}]
-                            }
-                        await notion.update_page(notion_page_id, props)
-                    except Exception:
-                        pass  # Non-fatal
+            created += 1
+            logger.info(
+                "Bulk import — created: %s (Close:%s)",
+                lead_name, close_lead_id,
+            )
 
-            except Exception as ghl_exc:
-                # GHL failed → log warning but count as success (lead is in Notion)
-                ghl_warnings.append(
-                    GHLWarning(
-                        index=idx,
-                        lead_name=lead_name,
-                        error=str(ghl_exc),
-                    )
-                )
-                logger.warning("Bulk import — GHL failed for %s (in Notion): %s", lead_name, ghl_exc)
-
-            # No local DB writes (lead_xref/sync_log removed)
-
-            # ── STEP 3: Quo THIRD (dialer sync) ──
-            # Non-fatal — if Quo fails, lead is still in Notion + GHL
-            try:
-                quo_id = await quo.sync_contact(lead_dict, test_mode=req.test_mode)
-                if quo_id:
-                    quo_synced += 1
-            except Exception as quo_exc:
-                logger.warning("Quo sync failed for %s (non-fatal): %s", lead_name, quo_exc)
-
-            # Track created vs updated based on Notion's result
-            if notion_is_new:
-                created += 1
-            else:
-                updated += 1
-            logger.info("Bulk import — %s: %s (Notion:%s, GHL:%s, Quo:%s)", "created" if notion_is_new else "updated", lead_name, notion_page_id, ghl_contact_id or "SKIPPED", "yes" if quo_synced else "no")
-
-            # Minimal rate limiting delay between GHL calls (30ms is enough)
+            # Rate limiting delay between Close API calls (300ms)
             if not req.dry_run and idx < len(req.leads) - 1:
-                await asyncio.sleep(0.03)
+                await asyncio.sleep(0.3)
 
         except Exception as exc:
             failed += 1
@@ -273,17 +185,14 @@ async def bulk_import_leads(
             logger.warning("Bulk import — failed %s: %s", lead_name, exc)
 
     logger.info(
-        "Bulk import complete: %d created, %d updated, %d failed, %d GHL warnings out of %d",
-        created, updated, failed, len(ghl_warnings), len(req.leads),
+        "Bulk import complete: %d created, %d failed out of %d",
+        created, failed, len(req.leads),
     )
 
     return BulkImportResponse(
         created=created,
-        updated=updated,
         failed=failed,
-        quo_synced=quo_synced,
         errors=errors,
-        ghl_warnings=ghl_warnings,
     )
 
 
