@@ -29,6 +29,7 @@ function LeadImport() {
   const [previewTab, setPreviewTab] = useState(0)
   const [perFileMaps, setPerFileMaps] = useState({})
   const [mappingFileIdx, setMappingFileIdx] = useState(0)
+  const [adjustAge, setAdjustAge] = useState(false)
 
   let getToken = null
   try { const { useAuth } = require('@clerk/clerk-react'); const auth = useAuth(); getToken = auth.getToken } catch {}
@@ -48,7 +49,7 @@ function LeadImport() {
     setColumnMap({}); setInitialAutoMap({}); setApplyMappingToAll(true); setMappingWarning('')
     setError(null); setGrandResult(null); setSheetUrl(''); setSheetLoading(false); setPreviewTab(0)
     setProgress({ current: 0, total: 0, fileIndex: 0, fileName: '' })
-    setPerFileMaps({}); setMappingFileIdx(0)
+    setPerFileMaps({}); setMappingFileIdx(0); setAdjustAge(false)
   }
 
   const parseOneFile = async (file) => {
@@ -167,7 +168,7 @@ function LeadImport() {
   const doImport = async () => {
     setStep('importing'); setError(null)
     let totalLeads = 0
-    for (let fi = 0; fi < fileQueue.length; fi++) { const fq = fileQueue[fi]; const map = getMapForFile(fi); totalLeads += buildLeads(fq.parsedRows, fq.headers, map, fq.vendor, fq.tier, fq.leadType, fq.leadAge, fq.purchaseDate).leads.length }
+    for (let fi = 0; fi < fileQueue.length; fi++) { const fq = fileQueue[fi]; const map = getMapForFile(fi); totalLeads += buildLeads(fq.parsedRows, fq.headers, map, fq.vendor, fq.tier, fq.leadType, fq.leadAge, fq.purchaseDate, adjustAge).leads.length }
     setProgress({ current: 0, total: totalLeads, fileIndex: 0, fileName: fileQueue[0]?.name || '' })
     const authHdrs = await getAuthHeaders()
     const BS = 50  // smaller batches = smoother progress bar
@@ -178,7 +179,7 @@ function LeadImport() {
       const fileMap = getMapForFile(fi)
       updateFileQueueItem(fi, { status: 'importing' })
       setProgress(prev => ({ ...prev, fileIndex: fi, fileName: fq.name }))
-      const { leads, droppedCount, droppedRows } = buildLeads(fq.parsedRows, fq.headers, fileMap, fq.vendor, fq.tier, fq.leadType, fq.leadAge, fq.purchaseDate)
+      const { leads, droppedCount, droppedRows } = buildLeads(fq.parsedRows, fq.headers, fileMap, fq.vendor, fq.tier, fq.leadType, fq.leadAge, fq.purchaseDate, adjustAge)
       grandDropped += droppedCount
       if (!leads.length) { updateFileQueueItem(fi, { status: 'done', result: { created: 0, failed: 0, ghlWarnings: [], droppedCount, droppedRows } }); continue }
       let fileCreated = 0, fileFailed = 0; const fileGhlWarnings = [], fileErrors = []
@@ -260,11 +261,11 @@ function LeadImport() {
     if (step !== 'preview') return []
     return fileQueue.map((fq, fi) => {
       const map = getMapForFile(fi)
-      const preview = buildLeads(fq.parsedRows.slice(0, 5), fq.headers, map, fq.vendor, fq.tier, fq.leadType, fq.leadAge, fq.purchaseDate)
-      const full = buildLeads(fq.parsedRows, fq.headers, map, fq.vendor, fq.tier, fq.leadType, fq.leadAge, fq.purchaseDate)
+      const preview = buildLeads(fq.parsedRows.slice(0, 5), fq.headers, map, fq.vendor, fq.tier, fq.leadType, fq.leadAge, fq.purchaseDate, adjustAge)
+      const full = buildLeads(fq.parsedRows, fq.headers, map, fq.vendor, fq.tier, fq.leadType, fq.leadAge, fq.purchaseDate, adjustAge)
       return { name: fq.name, previewLeads: preview.leads, totalLeads: full.leads.length, droppedCount: full.droppedCount, vendor: fq.vendor, tier: fq.tier, leadType: fq.leadType }
     })
-  }, [step, fileQueue, columnMap, perFileMaps, applyMappingToAll])
+  }, [step, fileQueue, columnMap, perFileMaps, applyMappingToAll, adjustAge])
   const totalLeadsAcrossFiles = useMemo(() => previewDataByFile.reduce((s, f) => s + f.totalLeads, 0), [previewDataByFile])
   const totalDroppedAcrossFiles = useMemo(() => previewDataByFile.reduce((s, f) => s + f.droppedCount, 0), [previewDataByFile])
 
@@ -366,6 +367,23 @@ function LeadImport() {
                   </tr>
                 ))}</tbody>
               </table>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.75rem' }}>
+              <input
+                type="checkbox"
+                id="adjustAge"
+                checked={adjustAge}
+                onChange={e => setAdjustAge(e.target.checked)}
+              />
+              <label htmlFor="adjustAge" style={{ fontFamily: 'var(--font-mono)', fontSize: '0.75rem', color: 'var(--text)', cursor: 'pointer' }}>
+                Adjust age from lead age bucket
+              </label>
+              <span
+                title="If a lead has an age recorded but no date of birth, estimates their current age using the lead age bucket and purchase date. Example: age 62 on a 13-24M old lead bought 6 months ago → estimated current age 64. Rounds down — people prefer being told they're younger."
+                style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 16, height: 16, borderRadius: '50%', background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text-muted)', fontSize: '0.65rem', fontWeight: 700, cursor: 'help' }}
+              >
+                ?
+              </span>
             </div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1rem' }}>
               <button className="btn btn-primary" onClick={() => setStep('mapping')} disabled={fileQueue.length === 0}>Next {'\u2192'}</button>

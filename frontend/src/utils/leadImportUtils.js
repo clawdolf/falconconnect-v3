@@ -399,7 +399,7 @@ function getCherylTier(dateStr) {
  *
  * Returns { leads, droppedCount } — tracks rows missing required fields.
  */
-export function buildLeads(rows, headers, columnMap, vendor, tier, leadType, leadAge, purchaseDate) {
+export function buildLeads(rows, headers, columnMap, vendor, tier, leadType, leadAge, purchaseDate, adjustAge = false) {
   const leads = []
   let droppedCount = 0
   const droppedRows = []
@@ -497,7 +497,66 @@ export function buildLeads(rows, headers, columnMap, vendor, tier, leadType, lea
       }
     }
 
+    // Age adjustment from lead age bucket (only when adjustAge=true and we have what we need)
+    if (adjustAge && lead.birth_year) {
+      const currentYear = new Date().getFullYear()
+      const ageOnFile = currentYear - lead.birth_year  // reverse: birth_year was set from age column
+      const lpd = lead.lpd || lead.mail_date || purchaseDate
+      const lage = lead.lead_age_bucket || leadAge
+      if (ageOnFile > 0 && lpd && lage) {
+        const estimated = estimateCurrentAge(ageOnFile, lpd, lage)
+        if (estimated !== null) {
+          lead.birth_year = currentYear - estimated  // store as birth_year for backend
+        }
+      }
+    }
+
     leads.push(lead)
   }
   return { leads, droppedCount, droppedRows }
+}
+
+
+/**
+ * Estimate current age from age-at-mailer + LPD + lead age bucket.
+ *
+ * Logic:
+ *   lead_creation_date = lpd - lage_midpoint_months
+ *   years_elapsed = (today - lead_creation_date) / 365.25
+ *   current_age = Math.floor(age_at_mailer + years_elapsed)
+ *
+ * Returns null if any required input is missing or unparseable.
+ * Rounds DOWN — people prefer being told they're younger.
+ */
+export function estimateCurrentAge(ageAtMailer, lpd, lageBucket) {
+  if (!ageAtMailer || !lpd || !lageBucket) return null
+
+  const age = parseInt(ageAtMailer, 10)
+  if (isNaN(age) || age < 18 || age > 120) return null
+
+  // Parse LPD
+  const lpdDate = new Date(lpd)
+  if (isNaN(lpdDate.getTime())) return null
+
+  // Parse lage bucket midpoint
+  const lageNorm = lageBucket.toLowerCase().replace(/\s/g, '').replace(/[–—]/g, '-')
+  let avgMonths = null
+  const rangeMatch = lageNorm.match(/^(\d+)-(\d+)/)
+  if (rangeMatch) {
+    avgMonths = (parseInt(rangeMatch[1], 10) + parseInt(rangeMatch[2], 10)) / 2
+  } else {
+    const singleMatch = lageNorm.match(/^(\d+)/)
+    if (singleMatch) avgMonths = parseInt(singleMatch[1], 10)
+  }
+  if (avgMonths === null) return null
+
+  // Lead creation date = LPD - avgMonths
+  const leadCreationDate = new Date(lpdDate)
+  leadCreationDate.setDate(leadCreationDate.getDate() - Math.round(avgMonths * 30.44))
+
+  // Years elapsed from lead creation to today
+  const today = new Date()
+  const yearsElapsed = (today - leadCreationDate) / (365.25 * 24 * 60 * 60 * 1000)
+
+  return Math.floor(age + yearsElapsed)
 }
