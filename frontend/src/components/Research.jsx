@@ -112,6 +112,92 @@ function Cbar({ value }) {
   )
 }
 
+function CycleProgressBar({ cycleRunning, cycleStartTime, cycleComplete }) {
+  const [elapsed, setElapsed] = useState(0)
+  const CYCLE_DURATION_MS = 15 * 60 * 1000
+
+  useEffect(() => {
+    if (!cycleRunning || !cycleStartTime) return
+    const tick = setInterval(() => {
+      setElapsed(Date.now() - cycleStartTime)
+    }, 1000)
+    return () => clearInterval(tick)
+  }, [cycleRunning, cycleStartTime])
+
+  if (!cycleRunning) return null
+
+  const progress = cycleComplete ? 100 : Math.min(95, (elapsed / CYCLE_DURATION_MS) * 95)
+  const elapsedSec = Math.floor(elapsed / 1000)
+  const minutes = Math.floor(elapsedSec / 60)
+  const seconds = elapsedSec % 60
+  const timeStr = String(minutes).padStart(2, '0') + ':' + String(seconds).padStart(2, '0')
+  const stalled = !cycleComplete && elapsed >= CYCLE_DURATION_MS
+
+  const cycleLabel = cycleStartTime
+    ? new Date(cycleStartTime).toLocaleDateString('en-US', { year: 'numeric', month: '2-digit', day: '2-digit' }).replace(/\//g, '-')
+      + '_' + String(new Date(cycleStartTime).getHours()).padStart(2, '0') + String(new Date(cycleStartTime).getMinutes()).padStart(2, '0')
+    : ''
+
+  const statusText = cycleComplete
+    ? '✓ CYCLE COMPLETE — Approval Queue updated'
+    : stalled
+      ? 'STILL RUNNING...'
+      : 'CYCLE RUNNING — ' + cycleLabel
+
+  return (
+    <div style={{
+      background: 'var(--surface)',
+      border: '1px solid var(--border)',
+      borderLeft: cycleComplete ? '3px solid #22c55e' : '3px solid var(--accent)',
+      borderRadius: 4,
+      padding: '0.6rem 0.85rem',
+      marginBottom: '0.75rem',
+      transition: 'all 0.3s ease',
+    }}>
+      <div style={{
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        marginBottom: '0.4rem',
+      }}>
+        <span style={{
+          fontFamily: 'var(--font-mono)', fontSize: '0.56rem', fontWeight: 600,
+          letterSpacing: '0.06em', textTransform: 'uppercase',
+          color: cycleComplete ? '#22c55e' : 'var(--text-muted)',
+        }}>
+          {statusText}
+        </span>
+        {!cycleComplete && (
+          <span style={{
+            fontFamily: 'var(--font-mono)', fontSize: '0.52rem',
+            color: 'var(--text-muted)',
+          }}>
+            {timeStr} / 15:00
+          </span>
+        )}
+      </div>
+      <div style={{
+        width: '100%', height: 6, background: 'var(--border)',
+        borderRadius: 3, overflow: 'hidden',
+      }}>
+        <div style={{
+          width: progress + '%', height: '100%', borderRadius: 3,
+          background: cycleComplete ? '#22c55e' : 'var(--accent)',
+          transition: cycleComplete ? 'width 0.5s ease' : 'width 1s linear',
+        }} />
+      </div>
+      <div style={{
+        display: 'flex', justifyContent: 'flex-end', marginTop: '0.2rem',
+      }}>
+        <span style={{
+          fontFamily: 'var(--font-mono)', fontSize: '0.48rem',
+          color: 'var(--text-muted)',
+        }}>
+          {cycleComplete ? '100' : Math.round(progress)}%
+        </span>
+      </div>
+    </div>
+  )
+}
+
 function Research({ onNavigate }) {
   const { getToken } = useAuth()
   const [err, setErr] = useState(null)
@@ -133,6 +219,10 @@ function Research({ onNavigate }) {
   const [loading, setLoading] = useState(true)
   const [tmsg, setTmsg] = useState(null)
   const [al, setAl] = useState({})
+  const [cycleRunning, setCycleRunning] = useState(false)
+  const [cycleStartTime, setCycleStartTime] = useState(null)
+  const [cycleComplete, setCycleComplete] = useState(false)
+  const preTriggerCycleIds = useRef(new Set())
   const rr = {
     approvals: useRef(null), hypotheses: useRef(null), playbook: useRef(null),
     dag: useRef(null), split: useRef(null), cycles: useRef(null),
@@ -177,9 +267,46 @@ function Research({ onNavigate }) {
   const fD = dagN.filter(n => (dd === 'all' || n.domain === dd) && (dt2 === 'all' || n.type === dt2))
 
   const trigger = async () => {
-    try { await af('/api/research/cycle/trigger', { method: 'POST' }); setTmsg('Cycle queued.'); setTimeout(() => setTmsg(null), 4000) }
+    try {
+      // Capture current cycle IDs before triggering
+      const currentCycles = await af('/api/research/cycles?limit=20')
+      const ids = new Set((currentCycles.cycles || []).map(c => c.cycle_id))
+      preTriggerCycleIds.current = ids
+
+      await af('/api/research/cycle/trigger', { method: 'POST' })
+      setTmsg('Cycle queued.')
+      setTimeout(() => setTmsg(null), 4000)
+
+      // Start progress bar
+      setCycleRunning(true)
+      setCycleStartTime(Date.now())
+      setCycleComplete(false)
+    }
     catch (e) { setErr(e.message) }
   }
+
+  // Polling for new cycle completion
+  useEffect(() => {
+    if (!cycleRunning || cycleComplete) return
+    const poll = setInterval(async () => {
+      try {
+        const data = await af('/api/research/cycles?limit=20')
+        const newCycles = (data.cycles || []).filter(c => !preTriggerCycleIds.current.has(c.cycle_id))
+        if (newCycles.length > 0) {
+          setCycleComplete(true)
+          // Refresh all data
+          fetchAll()
+          // Hide bar after 3 seconds
+          setTimeout(() => {
+            setCycleRunning(false)
+            setCycleComplete(false)
+            setCycleStartTime(null)
+          }, 3000)
+        }
+      } catch (e) { /* silent polling failure */ }
+    }, 10000)
+    return () => clearInterval(poll)
+  }, [cycleRunning, cycleComplete, af, fetchAll])
   const approve = async id => {
     setAl(p => ({ ...p, ['a' + id]: true }))
     try { await af('/api/research/mutations/' + id + '/approve', { method: 'POST' }); setPend(p => p.filter(x => x.id !== id)) }
@@ -215,6 +342,9 @@ function Research({ onNavigate }) {
           <button onClick={() => setErr(null)} style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: '0.72rem' }}>x</button>
         </div>
       )}
+
+      {/* CYCLE PROGRESS BAR */}
+      <CycleProgressBar cycleRunning={cycleRunning} cycleStartTime={cycleStartTime} cycleComplete={cycleComplete} />
 
       {/* A. STATUS BAR */}
       <section className="section">
