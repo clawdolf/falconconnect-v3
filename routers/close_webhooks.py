@@ -362,7 +362,7 @@ async def _process_appointment(
     gcal_event_id = await create_appointment_event(
         summary=f"Call with {contact_name or lead_id}",
         description=(
-            f"Open in Close: https://app.close.com/leads/{lead_id}\n"
+            f"Open in Close: https://app.close.com/leads/{lead_id}/\n"
             f"Contact: {contact_name}\n"
             f"Phone: {phone or 'N/A'}\n"
             f"Duration: {duration_minutes} min\n"
