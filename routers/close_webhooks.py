@@ -355,7 +355,7 @@ async def _process_appointment(
         ) or sms_results  # fallback if schedule_appointment_sms returns None
 
     # --- Step 2: Set up dummy email + GCal event ---
-    dummy_email = f"lead-{lead_id}@appointments.falconfinancial.org"
+    dummy_email = f"lead-{lead_id}@cal.falconnect.org"
 
     # Add dummy email to contact (merge, don't overwrite)
     existing_emails = contact.get("emails", [])
