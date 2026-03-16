@@ -1,10 +1,11 @@
-"""Research Engine endpoints — read-only dashboard for FalconLeads research loop.
+"""Research Engine endpoints — dashboard for FalconLeads research loop.
 
-All data comes from the FalconLeads SQLite DB (separate from FalconConnect's
-PostgreSQL). Uses sqlite3 directly. Every query handles missing tables gracefully.
+Core data (cycles, hypotheses, ads) lives in PostgreSQL (synced from
+Mac Mini SQLite via POST /sync). DAG, playbook, and performance split
+still read from local SQLite for now.
 
-Trigger endpoints use PostgreSQL (ResearchTrigger model) so the dashboard
-can queue cycles from Render while the Mac Mini poller reads them back.
+Trigger endpoints use PostgreSQL so the dashboard can queue cycles
+from Render while the Mac Mini poller reads them back.
 """
 
 import os
@@ -18,7 +19,12 @@ from sqlalchemy import select, func as sa_func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.database import get_session
-from db.models import ResearchTrigger
+from db.models import (
+    ResearchTrigger,
+    ResearchCycle,
+    ResearchHypothesis,
+    ResearchAd,
+)
 from middleware.auth import require_auth
 
 router = APIRouter()
@@ -39,7 +45,6 @@ def _get_conn() -> sqlite3.Connection:
     """Get a read-only SQLite connection to the falconleads DB."""
     db_path = _DB_PATH
     if not db_path.exists():
-        # Return connection to in-memory DB (all queries return empty)
         conn = sqlite3.connect(":memory:")
         conn.row_factory = sqlite3.Row
         return conn
@@ -50,18 +55,12 @@ def _get_conn() -> sqlite3.Connection:
 
 
 def _get_write_conn() -> sqlite3.Connection:
-    """Get a writable SQLite connection.
-
-    On Render (or any env where the falconleads path doesn't exist),
-    falls back to /tmp/falconleads_triggers.db — a writable temp location.
-    The research loop polls both paths.
-    """
+    """Get a writable SQLite connection."""
     db_path = _DB_PATH
     try:
         db_path.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(str(db_path))
     except (PermissionError, OSError):
-        # Render or other env — use temp DB for triggers
         db_path = Path("/tmp/falconleads_triggers.db")
         conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
@@ -84,14 +83,12 @@ def _safe_query(conn, sql, params=(), fetchone=False):
 
 
 def _row_to_dict(row):
-    """Convert sqlite3.Row to dict."""
     if row is None:
         return None
     return dict(row)
 
 
 def _rows_to_dicts(rows):
-    """Convert list of sqlite3.Row to list of dicts."""
     return [dict(r) for r in rows] if rows else []
 
 
@@ -102,7 +99,78 @@ def _verify_loop_token(x_loop_token: Optional[str]) -> None:
         raise HTTPException(status_code=401, detail="Invalid loop token.")
 
 
-# ── GET /status ──────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+#  SYNC — Mac Mini pushes cycle results to PostgreSQL
+# ══════════════════════════════════════════════════════════════════════════════
+
+@router.post("/sync")
+async def sync_cycle_results(
+    body: dict = Body(...),
+    x_loop_token: str = Header(None, alias="X-Loop-Token"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Called by Mac Mini loop after each cycle. Pushes SQLite results to PostgreSQL."""
+    _verify_loop_token(x_loop_token)
+
+    cycle_id = body.get("cycle_id")
+    if not cycle_id:
+        raise HTTPException(status_code=400, detail="cycle_id required.")
+
+    # Upsert cycle record
+    result = await session.execute(
+        select(ResearchCycle).where(ResearchCycle.cycle_id == cycle_id)
+    )
+    cycle = result.scalar_one_or_none()
+    if not cycle:
+        cycle = ResearchCycle(
+            cycle_id=cycle_id,
+            ads_generated=body.get("ads_generated", 0),
+            mutations_generated=body.get("mutations_generated", 0),
+            hypotheses_formed=body.get("hypotheses_formed", 0),
+            analysis_summary=body.get("analysis_summary"),
+            status="complete",
+        )
+        session.add(cycle)
+
+    # Insert hypotheses
+    for h in body.get("hypotheses", []):
+        hyp = ResearchHypothesis(
+            cycle_id=cycle_id,
+            hypothesis_text=h.get("text"),
+            account_type=h.get("account_type", "both"),
+            status=h.get("status", "proposed"),
+            confidence=h.get("confidence", 0.5),
+        )
+        session.add(hyp)
+
+    # Insert ads
+    inserted_ads = 0
+    for ad in body.get("ads", []):
+        new_ad = ResearchAd(
+            cycle_id=cycle_id,
+            name=ad.get("name", ""),
+            ad_copy=ad.get("ad_copy", ""),
+            headline=ad.get("headline"),
+            description=ad.get("description"),
+            cta=ad.get("cta"),
+            account_type=ad.get("account_type", "SAC"),
+            status="pending_approval",
+        )
+        session.add(new_ad)
+        inserted_ads += 1
+
+    await session.flush()
+    return {
+        "synced": True,
+        "cycle_id": cycle_id,
+        "ads_inserted": inserted_ads,
+        "hypotheses_inserted": len(body.get("hypotheses", [])),
+    }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  STATUS — reads from PostgreSQL
+# ══════════════════════════════════════════════════════════════════════════════
 
 @router.get("/status")
 async def research_status(
@@ -110,127 +178,319 @@ async def research_status(
     user=Depends(require_auth),
 ):
     """Return research loop status: last cycle, totals, next scheduled run."""
-    conn = _get_conn()
-    try:
-        # Last cycle
-        last_cycle = _safe_query(conn, """
-            SELECT cycle_id, created_at FROM research_cycles
-            ORDER BY created_at DESC LIMIT 1
-        """, fetchone=True)
 
-        # Total cycles
-        cycles_row = _safe_query(conn, """
-            SELECT COUNT(*) as total FROM research_cycles
-        """, fetchone=True)
+    # Last cycle from PostgreSQL
+    last_cycle_result = await session.execute(
+        select(ResearchCycle).order_by(ResearchCycle.created_at.desc()).limit(1)
+    )
+    last_cycle = last_cycle_result.scalar_one_or_none()
 
-        # Total ads generated
-        ads_row = _safe_query(conn, """
-            SELECT COALESCE(SUM(ads_generated), 0) as total FROM research_cycles
-        """, fetchone=True)
+    # Total cycles
+    cycles_count_result = await session.execute(
+        select(sa_func.count(ResearchCycle.id))
+    )
+    cycles_total = cycles_count_result.scalar() or 0
 
-        # Total hypotheses
-        hypo_row = _safe_query(conn, """
-            SELECT COUNT(*) as total FROM hypothesis_log
-        """, fetchone=True)
+    # Total ads generated across all cycles
+    ads_total_result = await session.execute(
+        select(sa_func.coalesce(sa_func.sum(ResearchCycle.ads_generated), 0))
+    )
+    ads_total = ads_total_result.scalar() or 0
 
-        # Total winners
-        winners_row = _safe_query(conn, """
-            SELECT COUNT(*) as total FROM hypothesis_log WHERE status = 'winner'
-        """, fetchone=True)
+    # Total hypotheses in PostgreSQL
+    hypo_count_result = await session.execute(
+        select(sa_func.count(ResearchHypothesis.id))
+    )
+    hypotheses_total = hypo_count_result.scalar() or 0
 
-        # Mutations total (ads with hypothesis_id that are mutations)
-        mutations_row = _safe_query(conn, """
-            SELECT COUNT(*) as total FROM ads WHERE status = 'pending_approval'
-        """, fetchone=True)
-
-        # Pending triggers count from PostgreSQL
-        pending_result = await session.execute(
-            select(sa_func.count(ResearchTrigger.id)).where(
-                ResearchTrigger.status == "pending"
-            )
+    # Total winners
+    winners_result = await session.execute(
+        select(sa_func.count(ResearchHypothesis.id)).where(
+            ResearchHypothesis.status == "winner"
         )
-        pending_triggers = pending_result.scalar() or 0
+    )
+    winners_total = winners_result.scalar() or 0
 
-        # Next Sunday midnight MST
-        now = datetime.now()
-        days_until_sunday = (6 - now.weekday()) % 7
-        if days_until_sunday == 0:
-            days_until_sunday = 7
-        next_sunday = now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=days_until_sunday)
+    # Pending approval ads
+    pending_ads_result = await session.execute(
+        select(sa_func.count(ResearchAd.id)).where(
+            ResearchAd.status == "pending_approval"
+        )
+    )
+    pending_ads = pending_ads_result.scalar() or 0
 
-        return {
-            "last_cycle_id": _row_to_dict(last_cycle)["cycle_id"] if last_cycle else None,
-            "last_run": _row_to_dict(last_cycle)["created_at"] if last_cycle else None,
-            "next_run": next_sunday.isoformat(),
-            "cycles_total": _row_to_dict(cycles_row)["total"] if cycles_row else 0,
-            "ads_generated_total": _row_to_dict(ads_row)["total"] if ads_row else 0,
-            "mutations_generated_total": _row_to_dict(mutations_row)["total"] if mutations_row else 0,
-            "hypotheses_total": _row_to_dict(hypo_row)["total"] if hypo_row else 0,
-            "winners_total": _row_to_dict(winners_row)["total"] if winners_row else 0,
-            "pending_triggers": pending_triggers,
-        }
-    finally:
-        conn.close()
+    # Pending triggers count
+    pending_triggers_result = await session.execute(
+        select(sa_func.count(ResearchTrigger.id)).where(
+            ResearchTrigger.status == "pending"
+        )
+    )
+    pending_triggers = pending_triggers_result.scalar() or 0
+
+    # Next Sunday midnight MST
+    now = datetime.now()
+    days_until_sunday = (6 - now.weekday()) % 7
+    if days_until_sunday == 0:
+        days_until_sunday = 7
+    next_sunday = now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=days_until_sunday)
+
+    return {
+        "last_cycle_id": last_cycle.cycle_id if last_cycle else None,
+        "last_run": last_cycle.created_at.isoformat() if last_cycle and last_cycle.created_at else None,
+        "next_run": next_sunday.isoformat(),
+        "cycles_total": cycles_total,
+        "ads_generated_total": ads_total,
+        "mutations_generated_total": 0,
+        "hypotheses_total": hypotheses_total,
+        "winners_total": winners_total,
+        "pending_ads": pending_ads,
+        "pending_triggers": pending_triggers,
+    }
 
 
-# ── GET /cycles ──────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+#  CYCLES — reads from PostgreSQL
+# ══════════════════════════════════════════════════════════════════════════════
 
 @router.get("/cycles")
 async def research_cycles(
     limit: int = Query(10, ge=1, le=100),
+    session: AsyncSession = Depends(get_session),
     user=Depends(require_auth),
 ):
-    """Return last N research cycles."""
-    conn = _get_conn()
-    try:
-        rows = _safe_query(conn, """
-            SELECT cycle_id, created_at, ads_generated, hypotheses_formed,
-                   SUBSTR(log, -500) as log
-            FROM research_cycles
-            ORDER BY created_at DESC
-            LIMIT ?
-        """, (limit,))
-        return {"cycles": _rows_to_dicts(rows)}
-    finally:
-        conn.close()
+    """Return last N research cycles from PostgreSQL."""
+    result = await session.execute(
+        select(ResearchCycle).order_by(ResearchCycle.created_at.desc()).limit(limit)
+    )
+    cycles = result.scalars().all()
+    return {
+        "cycles": [
+            {
+                "cycle_id": c.cycle_id,
+                "ads_generated": c.ads_generated,
+                "mutations_generated": c.mutations_generated,
+                "hypotheses_formed": c.hypotheses_formed,
+                "analysis_summary": c.analysis_summary,
+                "status": c.status,
+                "created_at": c.created_at.isoformat() if c.created_at else None,
+            }
+            for c in cycles
+        ]
+    }
 
 
-# ── GET /hypotheses ──────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+#  HYPOTHESES — reads from PostgreSQL
+# ══════════════════════════════════════════════════════════════════════════════
 
 @router.get("/hypotheses")
 async def research_hypotheses(
     status: str = Query("all"),
     limit: int = Query(50, ge=1, le=200),
+    session: AsyncSession = Depends(get_session),
     user=Depends(require_auth),
 ):
-    """Return hypothesis log entries, optionally filtered by status."""
+    """Return hypothesis log entries from PostgreSQL."""
+    q = select(ResearchHypothesis).order_by(ResearchHypothesis.created_at.desc()).limit(limit)
+    if status and status != "all":
+        q = q.where(ResearchHypothesis.status == status)
+    result = await session.execute(q)
+    hyps = result.scalars().all()
+    return {
+        "hypotheses": [
+            {
+                "id": h.id,
+                "cycle_id": h.cycle_id,
+                "hypothesis_text": h.hypothesis_text,
+                "account_type": h.account_type,
+                "status": h.status,
+                "confidence": h.confidence,
+                "created_at": h.created_at.isoformat() if h.created_at else None,
+            }
+            for h in hyps
+        ]
+    }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  ADS — reads from PostgreSQL (approval queue)
+# ══════════════════════════════════════════════════════════════════════════════
+
+@router.get("/ads")
+async def get_ads(
+    status: Optional[str] = Query(None),
+    account_type: Optional[str] = Query(None),
+    session: AsyncSession = Depends(get_session),
+    user=Depends(require_auth),
+):
+    """Return research ads from PostgreSQL, optionally filtered."""
+    q = select(ResearchAd).order_by(ResearchAd.created_at.desc())
+    if status:
+        q = q.where(ResearchAd.status == status)
+    if account_type:
+        q = q.where(ResearchAd.account_type == account_type)
+    result = await session.execute(q.limit(50))
+    ads = result.scalars().all()
+    return [
+        {
+            "id": a.id,
+            "name": a.name,
+            "ad_copy": a.ad_copy,
+            "headline": a.headline,
+            "description": a.description,
+            "cta": a.cta,
+            "account_type": a.account_type,
+            "status": a.status,
+            "created_at": a.created_at.isoformat() if a.created_at else None,
+            "cycle_id": a.cycle_id,
+        }
+        for a in ads
+    ]
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  APPROVE / REJECT — writes to PostgreSQL
+# ══════════════════════════════════════════════════════════════════════════════
+
+@router.post("/ads/{ad_id}/approve")
+async def approve_ad(
+    ad_id: int,
+    session: AsyncSession = Depends(get_session),
+    user=Depends(require_auth),
+):
+    """Approve a research ad in PostgreSQL."""
+    result = await session.execute(
+        select(ResearchAd).where(ResearchAd.id == ad_id)
+    )
+    ad = result.scalar_one_or_none()
+    if not ad:
+        raise HTTPException(status_code=404, detail="Ad not found.")
+
+    ad.status = "approved"
+    ad.approved_at = datetime.now(timezone.utc)
+    await session.flush()
+    return {
+        "ad": {
+            "id": ad.id,
+            "name": ad.name,
+            "ad_copy": ad.ad_copy,
+            "headline": ad.headline,
+            "description": ad.description,
+            "cta": ad.cta,
+            "account_type": ad.account_type,
+            "status": ad.status,
+            "approved_at": ad.approved_at.isoformat() if ad.approved_at else None,
+            "created_at": ad.created_at.isoformat() if ad.created_at else None,
+        }
+    }
+
+
+@router.post("/ads/{ad_id}/reject")
+async def reject_ad(
+    ad_id: int,
+    session: AsyncSession = Depends(get_session),
+    user=Depends(require_auth),
+):
+    """Reject a research ad in PostgreSQL."""
+    result = await session.execute(
+        select(ResearchAd).where(ResearchAd.id == ad_id)
+    )
+    ad = result.scalar_one_or_none()
+    if not ad:
+        raise HTTPException(status_code=404, detail="Ad not found.")
+
+    ad.status = "rejected"
+    ad.rejected_at = datetime.now(timezone.utc)
+    await session.flush()
+    return {
+        "ad": {
+            "id": ad.id,
+            "name": ad.name,
+            "status": ad.status,
+            "rejected_at": ad.rejected_at.isoformat() if ad.rejected_at else None,
+        }
+    }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  MUTATIONS (pending) — still reads SQLite (legacy ads table)
+# ══════════════════════════════════════════════════════════════════════════════
+
+@router.get("/mutations/pending")
+async def pending_mutations(user=Depends(require_auth)):
+    """Return ads with status='pending_approval' from SQLite."""
     conn = _get_conn()
     try:
-        if status and status != "all":
-            rows = _safe_query(conn, """
-                SELECT id, hypothesis, category, status, cpl_result, ctr_result,
-                       leads_generated, confidence, inspired_by,
-                       created_at, test_start_date, test_end_date
-                FROM hypothesis_log
-                WHERE status = ?
-                ORDER BY created_at DESC
-                LIMIT ?
-            """, (status, limit))
-        else:
-            rows = _safe_query(conn, """
-                SELECT id, hypothesis, category, status, cpl_result, ctr_result,
-                       leads_generated, confidence, inspired_by,
-                       created_at, test_start_date, test_end_date
-                FROM hypothesis_log
-                ORDER BY created_at DESC
-                LIMIT ?
-            """, (limit,))
-        return {"hypotheses": _rows_to_dicts(rows)}
+        rows = _safe_query(conn, """
+            SELECT id, name, ad_copy, headline, description, cta,
+                   account_type, variant, angle, hypothesis_id,
+                   status, created_date as created_at
+            FROM ads
+            WHERE status = 'pending_approval'
+            ORDER BY created_date DESC
+        """)
+        return {"pending": _rows_to_dicts(rows)}
     finally:
         conn.close()
 
 
-# ── GET /dag/nodes ───────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+#  MUTATIONS APPROVE / REJECT — still writes SQLite (legacy ads table)
+# ══════════════════════════════════════════════════════════════════════════════
+
+@router.post("/mutations/{ad_id}/approve")
+async def approve_mutation(
+    ad_id: int,
+    user=Depends(require_auth),
+):
+    """Set ad status to ACTIVE in SQLite (legacy)."""
+    conn = _get_write_conn()
+    try:
+        ad = _safe_query(conn, "SELECT id, status FROM ads WHERE id = ?", (ad_id,), fetchone=True)
+        if not ad:
+            raise HTTPException(status_code=404, detail="Ad not found.")
+
+        conn.execute("UPDATE ads SET status = 'ACTIVE', updated_at = CURRENT_TIMESTAMP WHERE id = ?", (ad_id,))
+        conn.commit()
+
+        updated = _safe_query(conn, """
+            SELECT id, name, ad_copy, headline, description, cta,
+                   account_type, status, created_date as created_at
+            FROM ads WHERE id = ?
+        """, (ad_id,), fetchone=True)
+        return {"ad": _row_to_dict(updated)}
+    finally:
+        conn.close()
+
+
+@router.post("/mutations/{ad_id}/reject")
+async def reject_mutation(
+    ad_id: int,
+    user=Depends(require_auth),
+):
+    """Set ad status to rejected in SQLite (legacy)."""
+    conn = _get_write_conn()
+    try:
+        ad = _safe_query(conn, "SELECT id, status FROM ads WHERE id = ?", (ad_id,), fetchone=True)
+        if not ad:
+            raise HTTPException(status_code=404, detail="Ad not found.")
+
+        conn.execute("UPDATE ads SET status = 'rejected', updated_at = CURRENT_TIMESTAMP WHERE id = ?", (ad_id,))
+        conn.commit()
+
+        updated = _safe_query(conn, """
+            SELECT id, name, ad_copy, headline, description, cta,
+                   account_type, status, created_date as created_at
+            FROM ads WHERE id = ?
+        """, (ad_id,), fetchone=True)
+        return {"ad": _row_to_dict(updated)}
+    finally:
+        conn.close()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  DAG — still reads SQLite
+# ══════════════════════════════════════════════════════════════════════════════
 
 @router.get("/dag/nodes")
 async def dag_nodes(
@@ -267,8 +527,6 @@ async def dag_nodes(
         conn.close()
 
 
-# ── GET /dag/lineage/{node_id} ───────────────────────────────────────────────
-
 @router.get("/dag/lineage/{node_id}")
 async def dag_lineage(
     node_id: str,
@@ -277,7 +535,6 @@ async def dag_lineage(
     """Traverse DAG edges backward up to depth 5. Return lineage chain."""
     conn = _get_conn()
     try:
-        # Get the starting node
         start_node = _safe_query(conn, """
             SELECT id, type, domain, content, metric_value, metric_name,
                    created_at, cycle_id
@@ -319,7 +576,6 @@ async def dag_lineage(
                 """, tuple(next_ids))
                 for n in nodes:
                     d = _row_to_dict(n)
-                    # Find the relationship label
                     for edge in edges:
                         ed = dict(edge)
                         if ed["from_node"] == d["id"]:
@@ -333,8 +589,6 @@ async def dag_lineage(
     finally:
         conn.close()
 
-
-# ── GET /dag/syntheses ───────────────────────────────────────────────────────
 
 @router.get("/dag/syntheses")
 async def dag_syntheses(
@@ -355,7 +609,9 @@ async def dag_syntheses(
         conn.close()
 
 
-# ── GET /playbook ────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+#  PLAYBOOK — reads from disk
+# ══════════════════════════════════════════════════════════════════════════════
 
 @router.get("/playbook")
 async def research_playbook(user=Depends(require_auth)):
@@ -371,95 +627,14 @@ async def research_playbook(user=Depends(require_auth)):
                 "rules_count": rules_count,
             }
         else:
-            return {
-                "content": "",
-                "last_updated": None,
-                "rules_count": 0,
-            }
+            return {"content": "", "last_updated": None, "rules_count": 0}
     except Exception:
-        return {
-            "content": "",
-            "last_updated": None,
-            "rules_count": 0,
-        }
+        return {"content": "", "last_updated": None, "rules_count": 0}
 
 
-# ── GET /mutations/pending ───────────────────────────────────────────────────
-
-@router.get("/mutations/pending")
-async def pending_mutations(user=Depends(require_auth)):
-    """Return ads with status='pending_approval'."""
-    conn = _get_conn()
-    try:
-        rows = _safe_query(conn, """
-            SELECT id, name, ad_copy, headline, description, cta,
-                   account_type, variant, angle, hypothesis_id,
-                   status, created_date as created_at
-            FROM ads
-            WHERE status = 'pending_approval'
-            ORDER BY created_date DESC
-        """)
-        return {"pending": _rows_to_dicts(rows)}
-    finally:
-        conn.close()
-
-
-# ── POST /mutations/{ad_id}/approve ──────────────────────────────────────────
-
-@router.post("/mutations/{ad_id}/approve")
-async def approve_mutation(
-    ad_id: int,
-    user=Depends(require_auth),
-):
-    """Set ad status to ACTIVE (approved)."""
-    conn = _get_write_conn()
-    try:
-        # Check ad exists
-        ad = _safe_query(conn, "SELECT id, status FROM ads WHERE id = ?", (ad_id,), fetchone=True)
-        if not ad:
-            raise HTTPException(status_code=404, detail="Ad not found.")
-
-        conn.execute("UPDATE ads SET status = 'ACTIVE', updated_at = CURRENT_TIMESTAMP WHERE id = ?", (ad_id,))
-        conn.commit()
-
-        updated = _safe_query(conn, """
-            SELECT id, name, ad_copy, headline, description, cta,
-                   account_type, status, created_date as created_at
-            FROM ads WHERE id = ?
-        """, (ad_id,), fetchone=True)
-        return {"ad": _row_to_dict(updated)}
-    finally:
-        conn.close()
-
-
-# ── POST /mutations/{ad_id}/reject ───────────────────────────────────────────
-
-@router.post("/mutations/{ad_id}/reject")
-async def reject_mutation(
-    ad_id: int,
-    user=Depends(require_auth),
-):
-    """Set ad status to rejected."""
-    conn = _get_write_conn()
-    try:
-        ad = _safe_query(conn, "SELECT id, status FROM ads WHERE id = ?", (ad_id,), fetchone=True)
-        if not ad:
-            raise HTTPException(status_code=404, detail="Ad not found.")
-
-        conn.execute("UPDATE ads SET status = 'rejected', updated_at = CURRENT_TIMESTAMP WHERE id = ?", (ad_id,))
-        conn.commit()
-
-        updated = _safe_query(conn, """
-            SELECT id, name, ad_copy, headline, description, cta,
-                   account_type, status, created_date as created_at
-            FROM ads WHERE id = ?
-        """, (ad_id,), fetchone=True)
-        return {"ad": _row_to_dict(updated)}
-    finally:
-        conn.close()
-
-
-# ── GET /performance/split ───────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+#  PERFORMANCE SPLIT — still reads SQLite
+# ══════════════════════════════════════════════════════════════════════════════
 
 @router.get("/performance/split")
 async def performance_split(user=Depends(require_auth)):
@@ -481,7 +656,6 @@ async def performance_split(user=Depends(require_auth)):
                 WHERE a.account_type = ? AND a.status = 'ACTIVE'
             """, (account_type,), fetchone=True)
 
-            # Top angle for this account type
             angle_row = _safe_query(conn, """
                 SELECT a.angle, SUM(p.leads) as total_leads
                 FROM ads a
@@ -505,7 +679,9 @@ async def performance_split(user=Depends(require_auth)):
         conn.close()
 
 
-# ── POST /cycle/trigger — Queue a cycle via PostgreSQL ───────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+#  TRIGGER — PostgreSQL queue for dashboard → Mac Mini
+# ══════════════════════════════════════════════════════════════════════════════
 
 @router.post("/cycle/trigger")
 async def trigger_cycle(
@@ -524,16 +700,12 @@ async def trigger_cycle(
     }
 
 
-# ── GET /triggers/pending — Polled by Mac Mini loop ─────────────────────────
-
 @router.get("/triggers/pending")
 async def get_pending_triggers(
     x_loop_token: str = Header(None, alias="X-Loop-Token"),
     session: AsyncSession = Depends(get_session),
 ):
-    """Called by the local research loop to check for pending triggers.
-    Authenticated by X-Loop-Token header matching LOOP_SERVICE_TOKEN env var.
-    """
+    """Called by the local research loop to check for pending triggers."""
     _verify_loop_token(x_loop_token)
 
     result = await session.execute(
@@ -551,8 +723,6 @@ async def get_pending_triggers(
         "triggered_at": trigger.triggered_at.isoformat() if trigger.triggered_at else None,
     }
 
-
-# ── POST /triggers/{trigger_id}/consume — Called after cycle runs ────────────
 
 @router.post("/triggers/{trigger_id}/consume")
 async def consume_trigger(

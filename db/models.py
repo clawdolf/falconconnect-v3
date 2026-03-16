@@ -279,3 +279,54 @@ class ResearchTrigger(Base):
     consumed_at: datetime = Column(DateTime(timezone=True), nullable=True)
     cycle_id: str = Column(String(64), nullable=True)  # filled in by loop after run
     notes: str = Column(Text, nullable=True)
+
+
+class ResearchCycle(Base):
+    """Research cycle records — synced from Mac Mini SQLite after each cycle."""
+
+    __tablename__ = "research_cycles"
+
+    id: int = Column(Integer, primary_key=True, autoincrement=True)
+    cycle_id: str = Column(String(64), unique=True, index=True)
+    ads_generated: int = Column(Integer, default=0)
+    mutations_generated: int = Column(Integer, default=0)
+    hypotheses_formed: int = Column(Integer, default=0)
+    analysis_summary: str = Column(Text, nullable=True)
+    status: str = Column(String(32), default="complete")
+    created_at: datetime = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class ResearchHypothesis(Base):
+    """Research hypotheses — synced from Mac Mini SQLite after each cycle."""
+
+    __tablename__ = "research_hypotheses"
+
+    id: int = Column(Integer, primary_key=True, autoincrement=True)
+    cycle_id: str = Column(String(64), index=True)
+    hypothesis_text: str = Column(Text)
+    account_type: str = Column(String(16))  # SAC | NONSAC | both
+    status: str = Column(String(32), default="proposed")  # proposed | testing | winner | loser
+    confidence: float = Column(Float, default=0.5)
+    created_at: datetime = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at: datetime = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class ResearchAd(Base):
+    """Research ad variants — synced from Mac Mini SQLite after each cycle."""
+
+    __tablename__ = "research_ads"
+
+    id: int = Column(Integer, primary_key=True, autoincrement=True)
+    cycle_id: str = Column(String(64), index=True)
+    hypothesis_id: int = Column(Integer, nullable=True)
+    name: str = Column(String(256))
+    ad_copy: str = Column(Text)
+    headline: str = Column(String(256), nullable=True)
+    description: str = Column(Text, nullable=True)
+    cta: str = Column(String(64), nullable=True)
+    account_type: str = Column(String(16))  # SAC | NONSAC
+    status: str = Column(String(32), default="pending_approval")  # pending_approval | approved | rejected | live | paused
+    approved_at: datetime = Column(DateTime(timezone=True), nullable=True)
+    rejected_at: datetime = Column(DateTime(timezone=True), nullable=True)
+    created_at: datetime = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at: datetime = Column(DateTime(timezone=True), onupdate=func.now())
