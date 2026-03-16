@@ -404,7 +404,7 @@ function Research({ onNavigate }) {
                   {ad.variant && <Badge label={'V' + ad.variant} />}
                   <Badge label={ad.account_type || 'sac'} colorKey={ad.account_type || 'sac'} />
                 </div>
-                <p style={{ fontFamily: 'var(--font-mono)', fontSize: '0.68rem', color: 'var(--text)', margin: '0 0 0.35rem', lineHeight: 1.5 }}>{ad.ad_copy || '(no copy)'}</p>
+                <p style={{ fontFamily: 'var(--font-mono)', fontSize: '0.68rem', color: 'var(--text)', margin: '0 0 0.35rem', lineHeight: 1.5 }}>{ad.ad_copy ? (ad.ad_copy.length > 140 ? ad.ad_copy.slice(0, 140) + '…' : ad.ad_copy) : '(no copy)'}</p>
                 {ad.headline && <p style={{ fontFamily: 'var(--font-mono)', fontSize: '0.62rem', color: 'var(--text)', fontWeight: 600, margin: '0 0 0.15rem' }}>{ad.headline}</p>}
                 {ad.description && <p style={{ fontFamily: 'var(--font-mono)', fontSize: '0.58rem', color: 'var(--text-muted)', margin: '0 0 0.5rem' }}>{ad.description}</p>}
                 <div style={{ display: 'flex', gap: '0.4rem' }}>
