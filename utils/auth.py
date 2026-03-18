@@ -1,6 +1,5 @@
 """Authentication and authorization utilities."""
 
-import hashlib
 import hmac
 import logging
 from typing import Optional

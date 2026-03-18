@@ -1,107 +1,129 @@
 # FalconConnect v3
 
-**Middleware layer for Falcon Financial** — dual GHL + Notion sync, iCal feeds, analytics hub.
+Lead sanitization engine and webhook middleware for **Falcon Financial**. Ingests leads from multiple vendors, normalizes/deduplicates them, pushes to **Close.com** (primary CRM), and bridges webhooks between Close, GoHighLevel, Notion, and Google Calendar.
 
 ## Architecture
 
-FalconConnect v3 is a clean FastAPI middleware that sits between:
-- **GoHighLevel (GHL)** — primary CRM, dialer, pipeline
-- **Notion** — lead tracking, appointment management, knowledge base
+```
+┌─────────────┐     ┌─────────────────────────────┐     ┌────────────┐
+│  React SPA  │────▶│  FastAPI backend (Render)    │────▶│ Close.com  │
+│  (Vite)     │     │  PostgreSQL (asyncpg)        │     │ GHL        │
+└─────────────┘     │  Alembic migrations          │     │ Notion     │
+                    │  Clerk auth                   │     │ Google Cal │
+                    └─────────────────────────────┘     └────────────┘
+```
 
-It provides:
-- **Dual-push lead capture** — one POST, both systems updated
-- **GHL → Notion webhook bridge** — appointments, stage changes, DNC mirrored automatically
-- **Two iCal feeds** — appointments and follow-ups as separate subscribable calendars
-- **Analytics API** — daily production metrics (dials, contacts, appts, closes, premium)
+- **Backend**: Python / FastAPI, async throughout, deployed on Render
+- **Frontend**: React (Vite), Clerk auth, served as static build
+- **Database**: PostgreSQL via SQLAlchemy async + Alembic migrations
+- **Integrations**: Close.com, GoHighLevel, Notion, Google Calendar, Clerk
 
-## Quick Start
+## Local Setup
 
 ```bash
-# Clone
-git clone https://github.com/clawdolf/falconconnect-v3.git
+# Clone & install
+git clone <repo-url>
 cd falconconnect-v3
+pip install -r requirements.txt
+
+# Frontend
+cd frontend && npm install && npm run dev
 
 # Environment
 cp .env.example .env
-# Fill in your API keys
+# Fill in API keys (see below)
 
-# Install
-pip install -r requirements.txt
-
-# Run (dev)
+# Run backend (dev)
 uvicorn main:app --reload --port 8000
 
 # Run migrations (production)
 alembic upgrade head
 ```
 
-## API Endpoints
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/health` | Root liveness probe |
-| `POST` | `/api/public/leads/capture` | Capture lead → GHL + Notion |
-| `POST` | `/api/webhooks/ghl` | GHL webhook receiver → Notion sync |
-| `GET` | `/api/calendar/appointments.ics?token=...` | iCal feed — appointments only |
-| `GET` | `/api/calendar/followups.ics?token=...` | iCal feed — follow-ups only |
-| `GET` | `/api/analytics/daily` | Daily production metrics |
-| `GET` | `/api/analytics/summary` | Aggregated summary |
-| `GET` | `/api/admin/health` | Admin liveness probe |
-| `GET` | `/api/admin/health/db` | Database connectivity |
-| `GET` | `/api/admin/version` | Version info |
-
-### Calendar Feeds
-
-Two separate iCal feeds so you can subscribe independently with different colors:
-
-- **Appointments** — timed 1-hour events, 60-min + 24-hour reminders
-  `GET /api/calendar/appointments.ics?token={CALENDAR_SECRET}`
-
-- **Follow-Ups** — all-day events, 8am morning reminder
-  `GET /api/calendar/followups.ics?token={CALENDAR_SECRET}`
-
-Both secured with the same `CALENDAR_SECRET` token.
-
-## Project Structure
-
-```
-├── main.py              # FastAPI app entry point
-├── config.py            # pydantic-settings configuration
-├── routers/             # API route handlers
-│   ├── leads.py         # Lead capture (dual push)
-│   ├── webhooks.py      # GHL → Notion bridge
-│   ├── calendar.py      # iCal feeds (appointments + follow-ups)
-│   ├── analytics.py     # Production metrics
-│   └── admin.py         # Health + version
-├── services/            # External API clients
-│   ├── ghl.py           # GoHighLevel API
-│   ├── notion.py        # Notion API
-│   ├── calendar.py      # iCal generation (two builders)
-│   └── plaid.py         # Plaid (Phase 2 stub)
-├── models/              # Pydantic models
-│   ├── lead.py          # LeadPayload
-│   ├── webhook.py       # GHLWebhookPayload
-│   └── xref.py          # LeadXref read model
-├── db/                  # Database layer
-│   ├── database.py      # Async engine + session
-│   └── models.py        # ORM models
-├── utils/               # Shared utilities
-│   ├── age.py           # Age + LAge calculation
-│   └── auth.py          # Auth + webhook verification
-└── alembic/             # Database migrations
-```
-
 ## Environment Variables
 
-See `.env.example` for the full list with descriptions.
+### Required
+
+| Variable | Description |
+|----------|-------------|
+| `DATABASE_URL` | PostgreSQL connection string (`postgresql+asyncpg://...`) |
+| `CLERK_PUBLISHABLE_KEY` | Clerk frontend auth key |
+| `CLERK_SECRET_KEY` | Clerk backend auth key |
+| `CLOSE_API_KEY` | Close.com API key |
+| `CLOSE_WEBHOOK_SECRET` | Shared secret for Close webhook verification |
+| `CLOSE_SMS_FROM_NUMBER` | Outbound SMS number for Close |
+| `CLOSE_APPOINTMENT_ACTIVITY_TYPE_ID` | Close custom activity type for appointments |
+
+### Integration Keys
+
+| Variable | Description |
+|----------|-------------|
+| `GHL_API_KEY` | GoHighLevel private integration API key |
+| `GHL_LOCATION_ID` | GHL location/sub-account ID |
+| `GHL_WEBHOOK_SECRET` | GHL webhook verification secret |
+| `GHL_CALENDAR_ID` | GHL calendar ID for appointment booking |
+| `NOTION_TOKEN` | Notion integration token |
+| `NOTION_LEADS_DB_ID` | Notion leads database ID |
+| `CALENDAR_SECRET` | Secret token for iCal feed URLs |
+| `QUO_API_KEY` | Quo (OpenPhone) API key |
+
+### Google Calendar (Service Account)
+
+| Variable | Description |
+|----------|-------------|
+| `GOOGLE_SERVICE_ACCOUNT_JSON` | Service account credentials JSON |
+| `GOOGLE_CALENDAR_ID` | Calendar ID (default: `primary`) |
+| `GOOGLE_CLIENT_ID` | OAuth client ID |
+| `GOOGLE_CLIENT_SECRET` | OAuth client secret |
+| `GOOGLE_REFRESH_TOKEN` | OAuth refresh token |
+
+### Notion → GHL Sync
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `NOTION_GHL_SYNC_ENABLED` | `true` | Master on/off switch |
+| `NOTION_GHL_SYNC_DRY_RUN` | `true` | Log-only mode (no GHL writes) |
+| `NOTION_GHL_SYNC_AFTER_DATE` | `2026-03-03` | Only sync appointments after this date |
+| `NOTION_GHL_SYNC_INTERVAL` | `300` | Seconds between sync polls |
+
+## API Overview
+
+| Router file | Prefix | Purpose |
+|-------------|--------|---------|
+| `routers/leads.py` | `/api/leads` | Lead capture & bulk CSV import to Close.com |
+| `routers/ad_leads.py` | `/api/ad-leads` | Ad-sourced lead ingestion |
+| `routers/webhooks.py` | `/api/webhooks` | GHL webhook receiver → Notion sync |
+| `routers/close_webhooks.py` | `/api/close-webhooks` | Close.com webhook handler (appointments, SMS reminders, GCal) |
+| `routers/calendar.py` | `/api/calendar` | iCal feeds (appointments + follow-ups) |
+| `routers/analytics.py` | `/api/analytics` | Daily production metrics |
+| `routers/campaigns.py` | `/api/campaigns` | Ad campaign management |
+| `routers/research.py` | `/api/research` | Research engine dashboard (hypotheses, ads, cycles) |
+| `routers/agents.py` | `/api/agents` | Agent profile management (FalconVerify) |
+| `routers/licenses.py` | `/api/licenses` | Agent license records |
+| `routers/sms_templates.py` | `/api/sms-templates` | Editable SMS reminder templates |
+| `routers/sheets.py` | `/api/sheets` | Google Sheets integration |
+| `routers/sync.py` | `/api/sync` | Research cycle sync (Mac Mini → PostgreSQL) |
+| `routers/admin.py` | `/api/admin` | Health checks, version info |
 
 ## Deployment
 
-Configured for **Render** via `render.yaml`. Push to `main` to deploy.
+Deployed on **Render** (service ID: `srv-d69n3c8gjchc73dkq2d0`).
 
-## Previous Version
+- Push to `main` triggers auto-deploy
+- Database: Render-managed PostgreSQL
+- Migrations run via `alembic upgrade head` on deploy
+- Frontend built as static site, served separately
 
-The v2 codebase is archived at [clawdolf/falconconnect-v2-archive](https://github.com/clawdolf/falconconnect-v2-archive).
+## Close.com Integration Notes
+
+- **Primary CRM** — all leads ultimately land in Close
+- Bulk import writes leads directly via Close API (`routers/leads.py`)
+- Close webhooks (`routers/close_webhooks.py`) handle:
+  - Appointment creation → SMS confirmation + 24hr/1hr reminders
+  - Google Calendar event sync (bidirectional)
+  - Lead status changes
+- SMS sent via Close's built-in SMS with phone number pool for area-code matching
+- Appointment reminders tracked in `appointment_reminders` table
 
 ---
 

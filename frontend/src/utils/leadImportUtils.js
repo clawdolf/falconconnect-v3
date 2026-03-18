@@ -39,9 +39,6 @@ export const VENDOR_AGE_BUCKETS = {
   'Cheryl':        ['T1', 'T2', 'T3', 'T4', 'T5'],
 }
 
-/** Legacy fallback — kept for any code that imported LEAD_AGE_BUCKETS directly */
-export const LEAD_AGE_BUCKETS = ['7-12M', '13-24M', '25-36M', '37-48M', '49-60M', '60+M']
-
 
 // ═══════════════════════════════════════════════
 // SECTION 2 — Lead Types & Vendors

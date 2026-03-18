@@ -516,26 +516,6 @@ async def upsert_appointment(
         return data
 
 
-async def get_contact_by_phone(phone: str) -> Optional[Dict[str, Any]]:
-    """Look up a GHL contact by phone number."""
-    settings = get_settings()
-
-    async with httpx.AsyncClient(timeout=30) as client:
-        resp = await client.get(
-            f"{GHL_BASE}/contacts/search/duplicate",
-            headers=_headers(),
-            params={
-                "locationId": settings.ghl_location_id,
-                "phone": phone,
-            },
-        )
-        resp.raise_for_status()
-        contact = resp.json().get("contact")
-        if contact:
-            return contact
-    return None
-
-
 async def get_contact_by_id(contact_id: str) -> Optional[Dict[str, Any]]:
     """Look up a GHL contact by ID."""
     async with httpx.AsyncClient(timeout=30) as client:

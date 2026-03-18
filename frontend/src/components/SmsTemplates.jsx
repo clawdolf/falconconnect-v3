@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react'
-import { useUser } from '@clerk/clerk-react'
 
 const TEMPLATE_LABELS = {
   confirmation: 'Confirmation',
@@ -18,7 +17,6 @@ function charCount(text) {
 }
 
 export default function SmsTemplates() {
-  const { user } = useUser()
   const [templates, setTemplates] = useState([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState({})

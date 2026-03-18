@@ -37,11 +37,6 @@ def _get_session_factory():
     return _async_session_factory
 
 
-# Convenience aliases (used by routers via Depends)
-def get_engine():
-    return _get_engine()
-
-
 async def get_session() -> AsyncSession:  # type: ignore[misc]
     """FastAPI dependency that yields an async DB session."""
     async with _get_session_factory()() as session:

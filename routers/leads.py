@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, field_validator
 
 from middleware.auth import require_auth
-from services import close, ghl, notion, quo
+from services import close, ghl, notion
 from services.ghl import normalize_phone, split_phone_field
 from utils.age import calculate_age, calculate_lage
 

@@ -32,11 +32,6 @@ function timeAgo(dateStr) {
   return d === 1 ? '1 day ago' : d < 30 ? d + ' days ago' : Math.floor(d / 30) + 'mo ago'
 }
 
-function daysBetween(s, e) {
-  if (!s || !e) return '—'
-  return Math.max(1, Math.ceil((new Date(e) - new Date(s)) / 86400000))
-}
-
 const BC = {
   proposed:'rgba(59,130,246,0.15)', testing:'rgba(234,179,8,0.15)', winner:'rgba(34,197,94,0.15)',
   loser:'rgba(239,68,68,0.15)', inconclusive:'rgba(156,163,175,0.15)',

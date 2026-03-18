@@ -54,20 +54,6 @@ class SyncLog(Base):
     created_at: datetime = Column(DateTime(timezone=True), server_default=func.now())
 
 
-class IssuedPaid(Base):
-    """Carrier commission deposits from Plaid (Phase 2)."""
-
-    __tablename__ = "issued_paid"
-
-    id: int = Column(Integer, primary_key=True, autoincrement=True)
-    carrier: str = Column(String(128), nullable=False)
-    amount: float = Column(Float, nullable=False)
-    transaction_date: date = Column(Date, nullable=False)
-    plaid_transaction_id: str = Column(String(128), unique=True, nullable=True)
-    description: str = Column(Text, nullable=True)
-    created_at: datetime = Column(DateTime(timezone=True), server_default=func.now())
-
-
 class AnalyticsDaily(Base):
     """Daily production metrics — dials, contacts, appts, closes."""
 
