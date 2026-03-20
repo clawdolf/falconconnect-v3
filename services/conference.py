@@ -5,6 +5,7 @@ Uses Twilio Conferences API (via twilio_client.py).
 """
 
 import logging
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
@@ -18,6 +19,20 @@ from db.models import ConferenceSession
 from services import twilio_client
 
 logger = logging.getLogger("falconconnect.conference")
+
+
+def normalize_e164(phone: str) -> str:
+    """Convert any US phone format to E.164 (+1XXXXXXXXXX).
+    Accepts: (480) 555-0100, 480-555-0100, 4805550100, +14805550100, etc.
+    """
+    digits = re.sub(r"\D", "", phone)
+    if len(digits) == 10:
+        return f"+1{digits}"
+    if len(digits) == 11 and digits.startswith("1"):
+        return f"+{digits}"
+    if phone.startswith("+") and len(digits) >= 11:
+        return f"+{digits}"
+    raise ValueError(f"Cannot normalize phone number to E.164: {phone!r}")
 
 # Seb's 19 Close phone numbers (pre-populated for caller ID verification)
 CLOSE_NUMBERS = [
@@ -70,6 +85,11 @@ async def start_conference(
     """
     settings = get_settings()
     conference_name = _generate_conference_name()
+
+    # Normalize all phone numbers to E.164
+    lead_phone = normalize_e164(lead_phone)
+    carrier_phone = normalize_e164(carrier_phone)
+    seb_close_number = normalize_e164(seb_close_number)
 
     # Create DB record
     conf_session = ConferenceSession(
