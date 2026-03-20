@@ -97,7 +97,7 @@ async def start_conference(
         carrier_phone=carrier_phone,
         seb_phone=seb_close_number,
         lead_id=lead_id or "",
-        status="initiating",
+        status="dialing_lead",
         started_at=datetime.now(timezone.utc),
     )
     session.add(conf_session)
@@ -107,31 +107,12 @@ async def start_conference(
     status_callback = f"{base_url}/api/conference/twiml/status"
     twiml_url = f"{base_url}/api/conference/twiml/conference?conference_name={conference_name}&conf_id={conf_id}"
 
-    # Step 1: Dial Seb on his Close number
-    # Caller ID = FC bridge Twilio number (or verified Close number if available)
-    try:
-        seb_result = await twilio_client.create_participant(
-            conference_name=conference_name,
-            to=seb_close_number,
-            from_=settings.twilio_from_number,
-            status_callback_url=status_callback,
-            twiml_url=twiml_url,
-            label="seb",
-            timeout=30,
-        )
-        conf_session.seb_participant_sid = seb_result.get("call_sid", "")
-    except Exception as e:
-        logger.error("Failed to dial Seb: %s", e)
-        conf_session.status = "seb_no_answer"
-        await session.commit()
-        raise
-
-    # Step 2: Dial Lead
+    # Step 1: Dial lead only — Seb dials in manually via "Dial Close" button once lead picks up
     try:
         lead_result = await twilio_client.create_participant(
             conference_name=conference_name,
             to=lead_phone,
-            from_=settings.twilio_from_number,  # FC bridge number — caller ID verification not yet active
+            from_=settings.twilio_from_number,
             status_callback_url=status_callback,
             twiml_url=twiml_url,
             label="lead",
@@ -144,19 +125,52 @@ async def start_conference(
         await session.commit()
         raise
 
-    # Conference is now initiating — Seb and Lead will join when they answer
-    conf_session.status = "active"
-    conf_session.conference_sid = conference_name  # Store the friendly name; real SID comes from status callback
+    conf_session.conference_sid = conference_name
     await session.commit()
 
     return {
         "conf_id": conf_id,
         "conference_name": conference_name,
         "conference_sid": conference_name,
-        "status": "active",
-        "seb_call_sid": conf_session.seb_participant_sid,
+        "status": "dialing_lead",
         "lead_call_sid": conf_session.lead_participant_sid,
     }
+
+
+async def dial_seb(
+    session: AsyncSession,
+    conf_id: str,
+    base_url: str = "",
+) -> Dict[str, Any]:
+    """Dial Seb's Close number into an existing conference.
+
+    Called after lead has picked up — Seb clicks 'Dial Close' to join.
+    """
+    conf = await _get_conference(session, conf_id)
+    settings = get_settings()
+    status_callback = f"{base_url}/api/conference/twiml/status"
+    twiml_url = f"{base_url}/api/conference/twiml/conference?conference_name={conf.conference_sid}&conf_id={conf_id}"
+
+    try:
+        seb_result = await twilio_client.create_participant(
+            conference_name=conf.conference_sid,
+            to=conf.seb_phone,
+            from_=settings.twilio_from_number,
+            status_callback_url=status_callback,
+            twiml_url=twiml_url,
+            label="seb",
+            timeout=30,
+        )
+        conf.seb_participant_sid = seb_result.get("call_sid", "")
+        conf.status = "active"
+        await session.commit()
+        return {
+            "seb_call_sid": conf.seb_participant_sid,
+            "status": "active",
+        }
+    except Exception as e:
+        logger.error("Failed to dial Seb: %s", e)
+        raise
 
 
 async def dial_carrier(

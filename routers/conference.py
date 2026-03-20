@@ -100,6 +100,23 @@ async def start_conference(
 # ── Parameterized routes ──
 
 
+@router.post("/conference/{conf_id}/dial-seb")
+async def dial_seb(
+    conf_id: str,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    user=Depends(require_auth),
+):
+    """Dial Seb's Close number into the conference. Called after lead picks up."""
+    base_url = _get_public_url(request)
+    try:
+        result = await conf_service.dial_seb(session, conf_id, base_url=base_url)
+        return result
+    except Exception as e:
+        logger.error("Failed to dial Seb: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/conference/{conf_id}/dial-carrier")
 async def dial_carrier(
     conf_id: str,

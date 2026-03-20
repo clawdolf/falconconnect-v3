@@ -119,6 +119,18 @@ function CallManagement() {
     }
   }
 
+  async function dialSeb() {
+    if (!activeConf) return
+    try {
+      await fetch(`${API}/conference/${activeConf.conf_id}/dial-seb`, {
+        method: 'POST',
+        headers: authHeaders(),
+      })
+    } catch (e) {
+      console.error('Dial seb error:', e)
+    }
+  }
+
   async function dialCarrier() {
     if (!activeConf) return
     try {
@@ -418,6 +430,29 @@ function CallManagement() {
                           <ControlBtn label="Hold" onClick={() => conferenceAction('hold', role)} />
                         )}
                       </div>
+
+                      {/* Dial Close button — Seb joins conference on demand */}
+                      {role === 'seb' && !p?.call_sid && (
+                        <button
+                          onClick={dialSeb}
+                          style={{
+                            marginTop: '0.5rem',
+                            padding: '0.35rem 0.7rem',
+                            background: 'var(--accent)',
+                            color: 'oklch(15% 0.01 85)',
+                            border: 'none',
+                            borderRadius: 2,
+                            fontFamily: 'var(--font-mono)',
+                            fontSize: '0.65rem',
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                            textTransform: 'uppercase',
+                            letterSpacing: '0.04em',
+                          }}
+                        >
+                          Dial Close
+                        </button>
+                      )}
 
                       {/* Dial Carrier button */}
                       {role === 'carrier' && !p?.call_sid && (
