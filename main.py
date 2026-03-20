@@ -437,7 +437,6 @@ async def debug_gcal_test():
     try:
         service = _get_calendar_service()
         results["service_ok"] = True
-        # Quick validation — list 1 calendar
         cals = service.calendarList().list(maxResults=1).execute()
         results["calendar_count"] = len(cals.get("items", []))
     except Exception as e:
@@ -465,6 +464,55 @@ async def debug_gcal_test():
         results["event_traceback"] = tb.format_exc()
 
     return results
+
+
+@app.get("/debug/appointment-records")
+async def debug_appointment_records():
+    """Diagnostic: list recent appointment_reminders and calendar_emails from DB."""
+    from sqlalchemy import text
+    from db.database import _get_session_factory as _sf
+
+    records = []
+    try:
+        async with _sf()() as session:
+            result = await session.execute(text("""
+                SELECT id, lead_id, contact_id, appointment_datetime,
+                       gcal_event_id, status,
+                       sms_id_confirmation, sms_id_24hr, sms_id_1hr
+                FROM appointment_reminders
+                ORDER BY id DESC
+                LIMIT 15
+            """))
+            rows = result.fetchall()
+            for r in rows:
+                records.append({
+                    "id": r[0], "lead_id": r[1], "contact_id": r[2],
+                    "appointment_datetime": str(r[3]),
+                    "gcal_event_id": r[4], "status": r[5],
+                    "sms_confirmation": r[6], "sms_24hr": r[7], "sms_1hr": r[8],
+                })
+    except Exception as e:
+        return {"error": str(e)}
+
+    cal_emails = []
+    try:
+        async with _sf()() as session:
+            result = await session.execute(text("""
+                SELECT id, lead_id, contact_id, dummy_email, gcal_event_id
+                FROM appointment_calendar_emails
+                ORDER BY id DESC
+                LIMIT 15
+            """))
+            rows = result.fetchall()
+            for r in rows:
+                cal_emails.append({
+                    "id": r[0], "lead_id": r[1], "contact_id": r[2],
+                    "dummy_email": r[3], "gcal_event_id": r[4],
+                })
+    except Exception as e:
+        cal_emails = [{"error": str(e)}]
+
+    return {"appointment_reminders": records, "calendar_emails": cal_emails}
 
 
 # Serve React frontend (built files) — must be LAST so API routes take priority
