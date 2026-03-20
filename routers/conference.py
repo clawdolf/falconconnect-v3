@@ -50,6 +50,19 @@ class CallerIdConfirmRequest(BaseModel):
 # ── Static routes FIRST (before parameterized {conf_id} routes) ──
 
 
+@router.get("/conference/health")
+async def conference_health():
+    """Debug: confirm Twilio creds are loaded."""
+    from config import get_settings
+    s = get_settings()
+    sid = s.twilio_account_sid
+    return {
+        "twilio_account_sid": f"{sid[:8]}...{sid[-4:]}" if len(sid) > 12 else ("EMPTY" if not sid else sid),
+        "twilio_auth_token_set": bool(s.twilio_auth_token),
+        "twilio_from_number": s.twilio_from_number,
+    }
+
+
 @router.get("/conference/sessions")
 async def list_sessions(
     session: AsyncSession = Depends(get_session),
