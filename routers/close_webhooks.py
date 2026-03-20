@@ -28,6 +28,7 @@ import hashlib
 import hmac
 import json
 import logging
+import traceback
 from datetime import datetime
 from typing import Optional
 
@@ -47,10 +48,12 @@ from services.close_sms import (
     schedule_appointment_sms,
 )
 from services.google_calendar import (
+    GCalError,
     create_appointment_event,
     delete_event,
     update_appointment_event,
 )
+from services.telegram_alerts import send_telegram_alert
 
 # Custom field ID for Appointment Status (choices: Booked, Confirmed, Rescheduled, Cancelled, No Show)
 CF_APPOINTMENT_STATUS = "cf_fpLqCQ4At7nrMwzAbHZDGQzgBvvq9WuenxG2PLK1i7u"
@@ -362,19 +365,44 @@ async def _process_appointment(
     await _patch_contact_add_calendar_email(contact_id, dummy_email, existing_emails)
 
     # Create Google Calendar event (duration from appointment length field)
-    gcal_event_id = await create_appointment_event(
-        summary=f"Call with {contact_name or lead_id}",
-        description=(
-            f"Open in Close: https://app.close.com/leads/{lead_id}/\n"
+    gcal_event_id = None
+    try:
+        gcal_event_id = await create_appointment_event(
+            summary=f"Call with {contact_name or lead_id}",
+            description=(
+                f"Open in Close: https://app.close.com/leads/{lead_id}/\n"
+                f"Contact: {contact_name}\n"
+                f"Phone: {phone or 'N/A'}\n"
+                f"Duration: {duration_minutes} min\n"
+                f"{f'Notes: {notes}' if notes else ''}"
+            ),
+            start_dt=appointment_dt,
+            duration_minutes=duration_minutes,
+            attendee_email=dummy_email,
+        )
+    except GCalError as exc:
+        logger.error(
+            "GCal event creation FAILED for lead %s: %s\n%s",
+            lead_id,
+            exc,
+            traceback.format_exc(),
+        )
+        # Send Telegram alert — this is a critical failure
+        await send_telegram_alert(
+            f"<b>GCal FAILED</b>\n"
+            f"Lead: {lead_id}\n"
             f"Contact: {contact_name}\n"
-            f"Phone: {phone or 'N/A'}\n"
-            f"Duration: {duration_minutes} min\n"
-            f"{f'Notes: {notes}' if notes else ''}"
-        ),
-        start_dt=appointment_dt,
-        duration_minutes=duration_minutes,
-        attendee_email=dummy_email,
-    )
+            f"Appointment: {appointment_dt.isoformat()}\n"
+            f"Error: {exc}\n\n"
+            f"The appointment was NOT added to Google Calendar. "
+            f"SMS was sent but calendar is empty.",
+        )
+        return {
+            "status": "error",
+            "reason": "gcal_failed",
+            "detail": str(exc),
+            "lead_id": lead_id,
+        }
 
     # --- Step 3: Save to database ---
     async with _get_session_factory()() as session:
@@ -527,8 +555,25 @@ async def close_webhook(request: Request):
         if not _verify_close_signature(
             raw_body, sig_hash, sig_timestamp, settings.close_webhook_secret
         ):
-            logger.warning("Close webhook signature verification failed — returning 200 to prevent retries")
-            # Return 200 so Close doesn't retry, but don't process the event
+            logger.error(
+                "Close webhook signature verification FAILED — "
+                "sig_hash=%s sig_timestamp=%s secret_len=%d body_len=%d. "
+                "This webhook was DROPPED. If this keeps happening, "
+                "recreate the Close webhook subscription with a matching signature_key.",
+                sig_hash[:10] if sig_hash else "MISSING",
+                sig_timestamp or "MISSING",
+                len(settings.close_webhook_secret),
+                len(raw_body),
+            )
+            # Alert on signature failures — this was the root cause of silent GCal drops
+            await send_telegram_alert(
+                "<b>Webhook signature verification FAILED</b>\n"
+                f"sig_hash present: {bool(sig_hash)}\n"
+                f"sig_timestamp present: {bool(sig_timestamp)}\n"
+                f"Payload size: {len(raw_body)} bytes\n\n"
+                "The appointment webhook was DROPPED. "
+                "Check CLOSE_WEBHOOK_SECRET matches the Close subscription's signature_key."
+            )
             return {"status": "skipped", "reason": "signature_verification_failed"}
     else:
         logger.warning(

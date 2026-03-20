@@ -282,6 +282,32 @@ async def lifespan(app: FastAPI):
     await _seed_sms_templates()
     await _seed_phone_numbers()
 
+    # Validate GCal connection at startup — log ERROR + alert if broken, but don't crash
+    try:
+        from services.google_calendar import test_connection
+        from services.telegram_alerts import send_telegram_alert as _tg_alert
+
+        gcal_status = await test_connection()
+        if gcal_status["healthy"]:
+            logger.info(
+                "STARTUP GCal OK — %d calendars, primary: %s",
+                gcal_status["calendar_count"],
+                gcal_status["primary_calendar"],
+            )
+        else:
+            logger.error(
+                "STARTUP GCal FAILED — %s. Appointments will NOT sync to calendar!",
+                gcal_status["error"],
+            )
+            await _tg_alert(
+                "<b>STARTUP: GCal connection FAILED</b>\n"
+                f"Error: {gcal_status['error']}\n\n"
+                "Appointments will NOT appear in Google Calendar until this is fixed.\n"
+                "Check GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN env vars.",
+            )
+    except Exception as exc:
+        logger.error("STARTUP GCal validation crashed: %s", exc)
+
     # Start background Notion → GHL sync loop (disabled 2026-03-15 — was blocking app startup)
     # sync_task = asyncio.create_task(sync_loop())
     # logger.info("Notion→GHL background sync task started")
@@ -426,6 +452,42 @@ app.include_router(sms_templates_router, prefix="/api", tags=["SMS Templates"])
 from routers import research
 app.include_router(research.router, prefix="/api/research", tags=["Research"])
 app.include_router(conference.router, prefix="/api", tags=["Conference Bridge"])
+
+@app.get("/api/health/gcal")
+async def health_gcal():
+    """Health check for Google Calendar integration.
+
+    Tests OAuth token refresh and calendar access. Use for:
+    - Heartbeat monitoring
+    - Post-deploy verification
+    - Debugging GCal failures
+
+    Returns 200 with healthy=True if GCal is accessible,
+    503 with healthy=False and error details if not.
+    """
+    from fastapi.responses import JSONResponse
+    from services.google_calendar import test_connection
+
+    result = await test_connection()
+    if result["healthy"]:
+        return {
+            "status": "healthy",
+            "service": "google_calendar",
+            "calendar_count": result["calendar_count"],
+            "primary_calendar": result["primary_calendar"],
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+    else:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "unhealthy",
+                "service": "google_calendar",
+                "error": result["error"],
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+
 
 @app.get("/debug/gcal-test")
 async def debug_gcal_test():
