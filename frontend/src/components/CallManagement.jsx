@@ -10,7 +10,7 @@ function CallManagement() {
   // Conference form
   const [leadPhone, setLeadPhone] = useState('')
   const [carrierPhone, setCarrierPhone] = useState('')
-  const [selectedNumber, setSelectedNumber] = useState('')
+  const [selectedNumber, setSelectedNumber] = useState('+18446813690') // FC toll-free — fixed until A2P clears
   const [leadId, setLeadId] = useState('')
   const [starting, setStarting] = useState(false)
   const [error, setError] = useState('')
@@ -322,21 +322,10 @@ function CallManagement() {
                   />
                 </div>
                 <div>
-                  <label className="form-label">Your Close Number (Caller ID)</label>
-                  <select
-                    className="custom-signin-input"
-                    value={selectedNumber}
-                    onChange={e => setSelectedNumber(e.target.value)}
-                    required
-                    style={{ cursor: 'pointer' }}
-                  >
-                    <option value="">Select a number...</option>
-                    {callerIds.map(n => (
-                      <option key={n.phone_number} value={n.phone_number}>
-                        {formatPhone(n.phone_number)}
-                      </option>
-                    ))}
-                  </select>
+                  <label className="form-label">Caller ID</label>
+                  <div className="custom-signin-input" style={{ opacity: 0.6, cursor: 'default', userSelect: 'none' }}>
+                    +1 (844) 681-3690 — FC toll-free
+                  </div>
                 </div>
                 <div>
                   <label className="form-label">Close Lead ID (optional)</label>
@@ -353,7 +342,7 @@ function CallManagement() {
                 )}
                 <button
                   type="submit"
-                  disabled={starting || !selectedNumber || !leadPhone || !carrierPhone}
+                  disabled={starting || !leadPhone || !carrierPhone}
                   style={{
                     padding: '0.6rem 1.25rem',
                     background: 'var(--accent)',
