@@ -424,6 +424,49 @@ app.include_router(sms_templates_router, prefix="/api", tags=["SMS Templates"])
 from routers import research
 app.include_router(research.router, prefix="/api/research", tags=["Research"])
 
+@app.get("/debug/gcal-test")
+async def debug_gcal_test():
+    """Diagnostic: test Google Calendar event creation and return full error."""
+    import traceback as tb
+    from datetime import timedelta
+    from services.google_calendar import _get_calendar_service, create_appointment_event, delete_event
+
+    results = {"service_ok": False, "event_ok": False}
+
+    # Step 1: test service build
+    try:
+        service = _get_calendar_service()
+        results["service_ok"] = True
+        # Quick validation — list 1 calendar
+        cals = service.calendarList().list(maxResults=1).execute()
+        results["calendar_count"] = len(cals.get("items", []))
+    except Exception as e:
+        results["service_error"] = f"{type(e).__name__}: {e}"
+        results["service_traceback"] = tb.format_exc()
+
+    # Step 2: test event creation (same flow as webhook)
+    try:
+        from datetime import timezone
+        start_dt = datetime.now(timezone.utc) + timedelta(hours=2)
+        event_id = await create_appointment_event(
+            summary="[DIAG] GCal Test",
+            description="Diagnostic — safe to delete",
+            start_dt=start_dt,
+            duration_minutes=15,
+            attendee_email="diag-test@cal.falconnect.org",
+        )
+        results["event_id"] = event_id
+        results["event_ok"] = event_id is not None
+        if event_id:
+            await delete_event(event_id)
+            results["cleanup"] = "deleted"
+    except Exception as e:
+        results["event_error"] = f"{type(e).__name__}: {e}"
+        results["event_traceback"] = tb.format_exc()
+
+    return results
+
+
 # Serve React frontend (built files) — must be LAST so API routes take priority
 frontend_dist = os.path.join(os.path.dirname(__file__), "frontend", "dist")
 if os.path.isdir(frontend_dist):
