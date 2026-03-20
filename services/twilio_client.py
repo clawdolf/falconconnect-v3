@@ -50,6 +50,7 @@ async def create_participant(
     data = {
         "From": from_,
         "To": to,
+        "Url": twiml_url,  # Required — TwiML to execute when participant answers (joins conference)
         "EarlyMedia": str(early_media).lower(),
         "StatusCallback": status_callback_url,
         "StatusCallbackEvent": "initiated ringing answered completed",
@@ -61,6 +62,8 @@ async def create_participant(
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         resp = await client.post(url, data=data, headers=_auth_header())
+        if not resp.is_success:
+            logger.error("Twilio error %s adding participant %s: %s", resp.status_code, label or to, resp.text)
         resp.raise_for_status()
         result = resp.json()
         logger.info("Added participant %s to conference %s: call_sid=%s",
