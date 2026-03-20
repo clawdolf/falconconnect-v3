@@ -463,6 +463,35 @@ def _get_participant_sid(conf: ConferenceSession, participant: str) -> Optional[
     return mapping.get(participant)
 
 
+async def _resolve_lead_id(conf: ConferenceSession, settings) -> str:
+    """Return lead_id from conf, or look it up in Close by lead phone number."""
+    if conf.lead_id:
+        return conf.lead_id
+
+    if not conf.lead_phone:
+        return ""
+
+    # Search Close for a lead matching this phone number
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                "https://api.close.com/api/v1/lead/",
+                params={"query": f'phone:"{conf.lead_phone}"', "_limit": 1},
+                auth=(settings.close_api_key, ""),
+            )
+            if resp.is_success:
+                data = resp.json()
+                leads = data.get("data", [])
+                if leads:
+                    lead_id = leads[0]["id"]
+                    logger.info("Resolved lead phone %s → %s", conf.lead_phone, lead_id)
+                    return lead_id
+    except Exception as e:
+        logger.warning("Could not resolve lead_id from Close: %s", e)
+
+    return ""
+
+
 async def _log_to_close(conf: ConferenceSession) -> None:
     """Log the conference call to Close as a call activity."""
     settings = get_settings()
@@ -470,7 +499,8 @@ async def _log_to_close(conf: ConferenceSession) -> None:
         logger.warning("No CLOSE_API_KEY — skipping Close call log")
         return
 
-    if not conf.lead_id:
+    lead_id = await _resolve_lead_id(conf, settings)
+    if not lead_id:
         logger.warning("No lead_id on conference %s — skipping Close log", conf.id)
         return
 
@@ -504,7 +534,7 @@ async def _log_to_close(conf: ConferenceSession) -> None:
     # This logs as a call activity linked to the lead so it appears in the timeline.
     # For remote_phone, use lead's number so Close can match it to the contact.
     payload = {
-        "lead_id": conf.lead_id,
+        "lead_id": lead_id,
         "direction": "outbound",
         "duration": duration,
         "note": note,
