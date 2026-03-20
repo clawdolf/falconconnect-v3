@@ -4,7 +4,7 @@ import * as XLSX from 'xlsx'
 import {
   VENDOR_TIERS, NEEDS_LEAD_AGE, VENDOR_AGE_BUCKETS, LEAD_TYPES, LEAD_VENDORS,
   LEAD_FIELDS, STEP_LABELS, autoMapHeaders, autoDetectVendor, buildLeads,
-  isMappingValid, getMissingRequired,
+  isMappingValid, getMissingRequired, getDuplicateMappings,
 } from '../utils/leadImportUtils'
 import QuickAddLead from './QuickAddLead'
 
@@ -123,6 +123,7 @@ function LeadImport() {
   }
 
   const mappingOk = isMappingValid(columnMap)
+  const duplicateMappings = useMemo(() => getDuplicateMappings(columnMap), [columnMap])
   const sortedHeaders = useMemo(() => [...headers].sort((a, b) => (columnMap[b] ? 1 : 0) - (columnMap[a] ? 1 : 0)), [headers, columnMap])
   const headerIndexMap = useMemo(() => { const m = {}; headers.forEach((h, i) => { m[h] = i }); return m }, [headers])
 
@@ -424,7 +425,12 @@ function LeadImport() {
             {mappingWarning && (
               <div style={{ background: 'oklch(18% 0.06 25)', border: '1px solid oklch(35% 0.15 25)', color: 'var(--red)', padding: '0.5rem 0.75rem', fontFamily: 'var(--font-mono)', fontSize: '0.7rem', borderRadius: 2, marginBottom: '0.75rem' }}>{mappingWarning}</div>
             )}
-            {!mappingOk && !mappingWarning && (
+            {duplicateMappings.length > 0 && (
+              <div style={{ background: 'oklch(18% 0.06 25)', border: '1px solid oklch(35% 0.15 25)', color: 'var(--red)', padding: '0.5rem 0.75rem', fontFamily: 'var(--font-mono)', fontSize: '0.7rem', borderRadius: 2, marginBottom: '0.75rem' }}>
+                Conflict: multiple columns mapped to the same field — {duplicateMappings.map(f => LEAD_FIELDS.find(lf => lf.value === f)?.label || f).join(', ')}. Change one to "skip" or a different field.
+              </div>
+            )}
+            {!mappingOk && !mappingWarning && duplicateMappings.length === 0 && (
               <div style={{ background: 'oklch(18% 0.04 75)', border: '1px solid oklch(25% 0.05 75)', color: 'var(--amber)', padding: '0.5rem 0.75rem', fontFamily: 'var(--font-mono)', fontSize: '0.7rem', borderRadius: 2, marginBottom: '0.75rem' }}>
                 Map at least First Name (or Full Name), Last Name, and Phone to continue.
               </div>
@@ -434,16 +440,18 @@ function LeadImport() {
                 const colIdx = headerIndexMap[h]
                 const sampleVal = sampleRow[colIdx]
                 const isAutoMapped = initialAutoMap[h] && initialAutoMap[h] === columnMap[h]
+                const isDupe = columnMap[h] && duplicateMappings.includes(columnMap[h])
                 return (
-                  <div key={h} className="column-map-row" style={{ background: isAutoMapped ? 'oklch(25% 0.05 145 / 0.3)' : 'transparent' }}>
+                  <div key={h} className="column-map-row" style={{ background: isDupe ? 'oklch(25% 0.08 25 / 0.4)' : isAutoMapped ? 'oklch(25% 0.05 145 / 0.3)' : 'transparent' }}>
                     <span className="column-map-label" title={h}>{h}</span>
                     <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.7rem', color: 'var(--text-muted)', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'inline-block' }} title={sampleVal != null ? String(sampleVal) : ''}>{sampleVal != null ? String(sampleVal) : ''}</span>
                     <span style={{ color: 'var(--text-muted)', fontSize: '0.7rem' }}>{'\u2192'}</span>
-                    <select className="form-input" style={{ flex: 1, fontSize: '0.75rem', padding: '0.25rem 0.5rem' }} value={columnMap[h] || ''} onChange={e => setColumnMap(prev => ({ ...prev, [h]: e.target.value }))}>
+                    <select className="form-input" style={{ flex: 1, fontSize: '0.75rem', padding: '0.25rem 0.5rem', ...(isDupe ? { borderColor: 'var(--red)', boxShadow: '0 0 0 1px var(--red)' } : {}) }} value={columnMap[h] || ''} onChange={e => setColumnMap(prev => ({ ...prev, [h]: e.target.value }))}>
                       <option value="">{'\u2014'} skip {'\u2014'}</option>
                       {LEAD_FIELDS.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
                     </select>
-                    {columnMap[h] && <span className="badge badge-success" style={{ fontSize: '0.55rem' }}>mapped</span>}
+                    {columnMap[h] && !isDupe && <span className="badge badge-success" style={{ fontSize: '0.55rem' }}>mapped</span>}
+                    {isDupe && <span className="badge" style={{ fontSize: '0.55rem', background: 'var(--red)', color: '#fff' }}>conflict</span>}
                   </div>
                 )
               })}
