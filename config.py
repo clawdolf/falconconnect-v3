@@ -61,6 +61,11 @@ class Settings(BaseSettings):
     google_client_secret: str = ""
     google_refresh_token: str = ""
 
+    # --- Twilio (Conference Bridge) ---
+    twilio_account_sid: str = ""
+    twilio_auth_token: str = ""
+    twilio_from_number: str = "+18446813690"
+
     # --- Quo (OpenPhone) ---
     quo_api_key: str = ""
 

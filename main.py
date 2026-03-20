@@ -400,6 +400,8 @@ async def debug_env():
         "settings_clerk_configured": bool(settings.clerk_secret_key),
         "settings_close_configured": bool(settings.close_api_key),
         "settings_gcal_configured": bool(settings.google_refresh_token),
+        "CLOSE_WEBHOOK_SECRET_len": len(settings.close_webhook_secret) if settings.close_webhook_secret else 0,
+        "CLOSE_WEBHOOK_SECRET_set": bool(settings.close_webhook_secret),
         "cwd": os.getcwd(),
     }
 
