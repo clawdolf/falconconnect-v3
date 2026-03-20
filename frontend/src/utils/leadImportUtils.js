@@ -240,7 +240,8 @@ export function isMappingValid(columnMap) {
   const vals = Object.values(columnMap).filter(Boolean)
   const hasPhone = vals.includes('phone') || vals.includes('mobile_phone') || vals.includes('home_phone')
   const hasName = (vals.includes('first_name') && vals.includes('last_name')) || vals.includes('full_name')
-  return hasPhone && hasName
+  const hasDupes = getDuplicateMappings(columnMap).length > 0
+  return hasPhone && hasName && !hasDupes
 }
 
 /** Get list of missing required fields for display */
@@ -252,6 +253,20 @@ export function getMissingRequired(columnMap) {
   if (!hasName) missing.push('Name (First + Last, or Full Name)')
   if (!hasPhone) missing.push('Phone')
   return missing
+}
+
+/**
+ * Return list of FC field names that are mapped to more than once.
+ * phone/home_phone/mobile_phone are intentionally allowed to overlap (phone fallback chain).
+ * first_name/last_name/full_name are allowed to overlap (name split path).
+ */
+export function getDuplicateMappings(columnMap) {
+  const ALLOWED_DUPES = new Set(['phone', 'home_phone', 'mobile_phone', 'first_name', 'last_name', 'full_name'])
+  const counts = {}
+  Object.values(columnMap).forEach(v => {
+    if (v && !ALLOWED_DUPES.has(v)) counts[v] = (counts[v] || 0) + 1
+  })
+  return Object.keys(counts).filter(k => counts[k] > 1)
 }
 
 /** Required field keys that must be present in mapping */
