@@ -265,7 +265,6 @@ function CallManagement() {
       <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.5rem' }}>
         {[
           { key: 'conference', label: 'Conference Bridge' },
-          { key: 'callerid', label: 'Caller ID Verification' },
           { key: 'history', label: 'Recent Sessions' },
         ].map(t => (
           <button
@@ -333,16 +332,11 @@ function CallManagement() {
                   >
                     <option value="">Select a number...</option>
                     {callerIds.map(n => (
-                      <option key={n.phone_number} value={n.phone_number} disabled={!n.verified}>
-                        {formatPhone(n.phone_number)} {n.verified ? '' : '(not verified)'}
+                      <option key={n.phone_number} value={n.phone_number}>
+                        {formatPhone(n.phone_number)}
                       </option>
                     ))}
                   </select>
-                  {verifiedNumbers.length === 0 && !callerIdsLoading && (
-                    <p style={{ fontFamily: 'var(--font-mono)', fontSize: '0.65rem', color: 'var(--amber)', marginTop: '0.35rem' }}>
-                      No verified numbers. Go to Caller ID Verification tab first.
-                    </p>
-                  )}
                 </div>
                 <div>
                   <label className="form-label">Close Lead ID (optional)</label>

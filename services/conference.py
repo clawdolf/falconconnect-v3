@@ -111,7 +111,7 @@ async def start_conference(
         lead_result = await twilio_client.create_participant(
             conference_name=conference_name,
             to=lead_phone,
-            from_=seb_close_number,  # Show Seb's Close number as caller ID
+            from_=settings.twilio_from_number,  # FC bridge number — caller ID verification not yet active
             status_callback_url=status_callback,
             twiml_url=twiml_url,
             label="lead",
