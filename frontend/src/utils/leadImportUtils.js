@@ -285,7 +285,8 @@ export function getMissingRequired(columnMap) {
  * first_name/last_name/full_name are allowed to overlap (name split path).
  */
 export function getDuplicateMappings(columnMap) {
-  const ALLOWED_DUPES = new Set(['phone', 'home_phone', 'first_name', 'last_name', 'full_name'])
+  // lead_type allowed to dupe: Aria has both TYPE ("NEW MTG") and LEAD TYPE ("Gold") — both map here, both get remapped/dropped in buildLeads
+  const ALLOWED_DUPES = new Set(['phone', 'home_phone', 'first_name', 'last_name', 'full_name', 'lead_type'])
   const counts = {}
   Object.values(columnMap).forEach(v => {
     if (v && !ALLOWED_DUPES.has(v)) counts[v] = (counts[v] || 0) + 1
@@ -545,9 +546,15 @@ export function buildLeads(rows, headers, columnMap, vendor, tier, leadType, lea
     }
 
     // Aria: LEAD TYPE column maps to tier (Gold/Silver/N/A), not lead_type
-    if (vendor === 'Aria Leads' && lead.lead_type) {
-      if (!lead.tier) lead.tier = lead.lead_type
-      delete lead.lead_type
+    // TYPE column (e.g. "NEW MTG") is Aria-internal — drop both
+    // When both columns exist, prefer the one that looks like a tier value (Gold/Silver/N/A)
+    if (vendor === 'Aria Leads') {
+      if (lead.lead_type) {
+        const ltVal = String(lead.lead_type).trim()
+        const looksLikeTier = /^(gold|silver|n\/a|bronze|platinum)$/i.test(ltVal)
+        if (looksLikeTier && !lead.tier) lead.tier = ltVal
+        delete lead.lead_type
+      }
     }
 
     // Apply batch metadata (only when row doesn't have its own value)
