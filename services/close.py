@@ -321,12 +321,26 @@ async def create_lead(lead_dict: dict) -> dict:
         except (ValueError, TypeError):
             _set_cf("Loan Amount", str(loan_raw))
 
-    # Lead Purchase Date (date) — from lpd or mail_date
-    lpd_raw = lead_dict.get("lpd") or lead_dict.get("mail_date")
+    # Lead Purchase Date (date) — from lpd only
+    lpd_raw = lead_dict.get("lpd")
     if lpd_raw:
         lpd_parsed = _parse_date_flexible(lpd_raw)
         if lpd_parsed:
             _set_cf("Lead Purchase Date", lpd_parsed)
+
+    # Mortgage Sale Date (date) — refi/mortgage closing sale date
+    mail_date_raw = lead_dict.get("mail_date")
+    if mail_date_raw:
+        mail_date_parsed = _parse_date_flexible(mail_date_raw)
+        if mail_date_parsed:
+            _set_cf("Mortgage Sale Date", mail_date_parsed)
+
+    # Call In Date (date) — date prospect called into the mailer
+    call_in_date_raw = lead_dict.get("call_in_date")
+    if call_in_date_raw:
+        call_in_date_parsed = _parse_date_flexible(call_in_date_raw)
+        if call_in_date_parsed:
+            _set_cf("Call In Date", call_in_date_parsed)
 
     # Lead Age bracket (LAge)
     lead_age_bucket = lead_dict.get("lead_age_bucket")

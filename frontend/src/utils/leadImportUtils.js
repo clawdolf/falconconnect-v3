@@ -93,7 +93,8 @@ export const LEAD_FIELDS = [
   // Financial
   { value: 'lender', label: 'Lender' },
   { value: 'loan_amount', label: 'Loan Amount' },
-  { value: 'mail_date', label: 'Mail Date' },
+  { value: 'mail_date', label: 'Mortgage Sale Date' },
+  { value: 'call_in_date', label: 'Call In Date (Mailer Response Date)' },
 
   // Notes & flags
   { value: 'notes', label: 'Notes' },
@@ -181,7 +182,8 @@ export const COLUMN_ALIASES = {
   'mortgage': 'loan_amount',
   'mtg amt': 'loan_amount', 'mtgamt': 'loan_amount',  // Cheryl vendor format
   'mail date': 'mail_date', 'mail_date': 'mail_date', 'maildate': 'mail_date',
-  'closing date': 'mail_date', 'closingdate': 'mail_date',  // Cheryl vendor format (closest FC equivalent)
+  'closing date': 'mail_date', 'closingdate': 'mail_date',  // Cheryl vendor format
+  'mortgage sale date': 'mail_date', 'mtg sale date': 'mail_date',
 
   // ── Notes / Best Time ──
   'notes': 'notes', 'note': 'notes',
@@ -194,7 +196,7 @@ export const COLUMN_ALIASES = {
   'delivery date': 'lpd', 'deliverydate': 'lpd',  // Cheryl vendor format
 
   // ── Lead Received Date ──
-  'call in date': 'lead_received', 'call_in_date': 'lead_received', 'callindate': 'lead_received',  // Aria vendor
+  'call in date': 'call_in_date', 'call_in_date': 'call_in_date', 'callindate': 'call_in_date',  // Aria vendor — date prospect called into mailer
   'lead received': 'lead_received', 'lead_received': 'lead_received',
   'date lead rcvd': 'lead_received', 'date lead received': 'lead_received',  // Cheryl vendor (received date, not purchase date)
 
@@ -403,7 +405,7 @@ function normalizeDateValue(val) {
 }
 
 /** Fields that contain date values and should be normalized */
-const DATE_FIELDS = ['dob', 'mail_date', 'lpd', 'lead_received', 'spouse_dob']
+const DATE_FIELDS = ['dob', 'mail_date', 'lpd', 'lead_received', 'spouse_dob', 'call_in_date']
 
 /**
  * Determine Cheryl vendor tier from lead_received date.
