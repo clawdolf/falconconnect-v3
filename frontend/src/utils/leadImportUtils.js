@@ -16,7 +16,7 @@
 
 export const VENDOR_TIERS = {
   'HOFLeads':       ['Diamond', 'Gold', 'Silver'],
-  'Proven Leads':   ['N/A'],
+  'Anne Proven Leads':   ['N/A'],
   'Aria Leads':     ['Gold', 'Silver', 'N/A'],
   'StrongPoint':    ['N/A'],
   'MilMo':          ['Gold', 'Silver', 'N/A'],
@@ -25,7 +25,7 @@ export const VENDOR_TIERS = {
 
 export const NEEDS_LEAD_AGE = {
   'HOFLeads': false,
-  'Proven Leads': true,
+  'Anne Proven Leads': true,
   'Aria Leads': true,
   'MilMo': true,
   'Cheryl': true,
@@ -33,7 +33,7 @@ export const NEEDS_LEAD_AGE = {
 
 export const VENDOR_AGE_BUCKETS = {
   'HOFLeads':      [],
-  'Proven Leads':  ['3M', '6M', '7-12M', '13-24M', '25-36M', '37-48M', '49-60M', '60+M'],
+  'Anne Proven Leads':  ['3M', '6M', '7-12M', '13-24M', '25-36M', '37-48M', '49-60M', '60+M'],
   'Aria Leads':    ['7-12M', '13-24M', '25-36M', '37-48M', '49-60M', '60+M'],
   'MilMo':         ['7-12M', '13-24M', '25-36M', '37-48M', '49-60M', '60+M'],
   'Cheryl':        ['T1', 'T2', 'T3', 'T4', 'T5'],
@@ -307,7 +307,7 @@ export function autoDetectVendor(filename) {
     out.vendor = 'HOFLeads'
     if (fn.includes('gold') || fn.includes('t2')) out.tier = 'Gold'
     else if (fn.includes('silver') || fn.includes('t3')) out.tier = 'Silver'
-  } else if (fn.includes('proven')) { out.vendor = 'Proven Leads'; out.tier = 'N/A' }
+  } else if (fn.includes('proven')) { out.vendor = 'Anne Proven Leads'; out.tier = 'N/A' }
   else if (fn.includes('aria')) { out.vendor = 'Aria Leads'; out.tier = 'Gold' }
   else if (fn.includes('milmo')) { out.vendor = 'MilMo'; out.tier = 'Gold' }
   else if (fn.includes('scl') || fn.includes('cheryl')) { out.vendor = 'Cheryl'; out.tier = 'T1' }
