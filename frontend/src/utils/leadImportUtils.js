@@ -75,7 +75,6 @@ export const LEAD_FIELDS = [
 
   // Demographics
   { value: 'age', label: 'Age' },
-  { value: 'birth_year', label: 'Birth Year' },
   { value: 'dob', label: 'DOB (Full Date)' },
   { value: 'gender', label: 'Gender' },
 
@@ -153,9 +152,8 @@ export const COLUMN_ALIASES = {
   'dob': 'dob', 'date of birth': 'dob', 'dateofbirth': 'dob',
   'birthdate': 'dob', 'birth_date': 'dob', 'birth date': 'dob',
   'birthdate 1': 'dob', 'birthdate1': 'dob',  // Cheryl vendor format
-  'birth year': 'birth_year', 'birth_year': 'birth_year', 'birthyear': 'birth_year',
   'age': 'age', 'borrowerage': 'age', 'primary age': 'age', 'applicant age': 'age', 'insured age': 'age',
-  'age1': 'birth_year',  // Cheryl vendor format (birth year column, not current age)
+  'age1': 'age', 'birth year': 'age', 'birth_year': 'age', 'birthyear': 'age',  // all age-like columns → age
 
   // ── Spouse DOB / Age ──
   'birthdate 2': 'spouse_dob', 'birthdate2': 'spouse_dob',  // Cheryl vendor format
@@ -546,11 +544,17 @@ export function buildLeads(rows, headers, columnMap, vendor, tier, leadType, lea
       }
     }
 
-    // age (current age integer) → birth_year fallback (only if no DOB/birth_year already set)
-    if (lead.age && !lead.birth_year && !lead.dob) {
+    // age → birth_year (only if no DOB already set)
+    if (lead.age && !lead.dob) {
       const a = parseInt(lead.age, 10)
-      if (!isNaN(a) && a > 0 && a < 120) {
-        lead.birth_year = new Date().getFullYear() - a
+      if (!isNaN(a)) {
+        if (a >= 1900 && a <= new Date().getFullYear()) {
+          // looks like a birth year (e.g. 1965) — use directly
+          lead.birth_year = a
+        } else if (a > 0 && a < 120) {
+          // actual age number (e.g. 58) — derive birth year
+          lead.birth_year = new Date().getFullYear() - a
+        }
       }
     }
     delete lead.age  // always clean up — backend expects birth_year
