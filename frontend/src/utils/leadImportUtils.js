@@ -74,6 +74,7 @@ export const LEAD_FIELDS = [
   { value: 'zip_code', label: 'ZIP Code' },
 
   // Demographics
+  { value: 'age', label: 'Age' },
   { value: 'birth_year', label: 'Birth Year' },
   { value: 'dob', label: 'DOB (Full Date)' },
   { value: 'gender', label: 'Gender' },
@@ -153,8 +154,8 @@ export const COLUMN_ALIASES = {
   'birthdate': 'dob', 'birth_date': 'dob', 'birth date': 'dob',
   'birthdate 1': 'dob', 'birthdate1': 'dob',  // Cheryl vendor format
   'birth year': 'birth_year', 'birth_year': 'birth_year', 'birthyear': 'birth_year',
-  'age': 'birth_year', 'borrowerage': 'birth_year',
-  'age1': 'birth_year',  // Cheryl vendor format (redundant if BIRTHDATE 1 mapped, but safe)
+  'age': 'age', 'borrowerage': 'age', 'primary age': 'age', 'applicant age': 'age', 'insured age': 'age',
+  'age1': 'birth_year',  // Cheryl vendor format (birth year column, not current age)
 
   // ── Spouse DOB / Age ──
   'birthdate 2': 'spouse_dob', 'birthdate2': 'spouse_dob',  // Cheryl vendor format
@@ -536,6 +537,23 @@ export function buildLeads(rows, headers, columnMap, vendor, tier, leadType, lea
       }
     }
     if (purchaseDate && !lead.lpd) lead.lpd = purchaseDate
+
+    // DOB → birth_year (always — highest priority, overrides any other source)
+    if (lead.dob) {
+      const parsed = new Date(lead.dob)
+      if (!isNaN(parsed)) {
+        lead.birth_year = parsed.getFullYear()
+      }
+    }
+
+    // age (current age integer) → birth_year fallback (only if no DOB/birth_year already set)
+    if (lead.age && !lead.birth_year && !lead.dob) {
+      const a = parseInt(lead.age, 10)
+      if (!isNaN(a) && a > 0 && a < 120) {
+        lead.birth_year = new Date().getFullYear() - a
+      }
+    }
+    delete lead.age  // always clean up — backend expects birth_year
 
     // 2-digit birth year correction (e.g. "65" → 1965, "24" → 2024)
     if (lead.birth_year) {
