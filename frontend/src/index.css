@@ -4,24 +4,24 @@
 
 :root {
   /* ── Surface system ── */
-  --bg: oklch(8% 0.005 240);
-  --surface: oklch(13% 0.01 240);
-  --surface-hover: oklch(16% 0.01 240);
-  --border: oklch(26% 0.012 240);
-  --border-subtle: oklch(20% 0.01 240);
+  --bg: oklch(9% 0.005 240);
+  --surface: oklch(17% 0.012 240);
+  --surface-hover: oklch(22% 0.014 240);
+  --border: oklch(36% 0.016 240);
+  --border-subtle: oklch(28% 0.012 240);
 
   /* ── Text ── */
-  --text: oklch(95% 0.004 240);
-  --text-muted: oklch(68% 0.01 240);
+  --text: oklch(97% 0.004 240);
+  --text-muted: oklch(78% 0.012 240);
 
   /* ── Accent ── */
-  --accent: oklch(78% 0.15 85);
-  --accent-dim: oklch(68% 0.12 85);
+  --accent: oklch(82% 0.16 85);
+  --accent-dim: oklch(72% 0.13 85);
 
   /* ── Status ── */
-  --green: oklch(72% 0.18 145);
-  --amber: oklch(75% 0.15 75);
-  --red: oklch(62% 0.2 25);
+  --green: oklch(78% 0.19 145);
+  --amber: oklch(80% 0.16 75);
+  --red: oklch(68% 0.22 25);
 
   /* ── Spacing ── */
   --sidebar-w: 240px;
@@ -42,7 +42,8 @@ body {
   font-family: var(--font-mono);
   background: var(--bg);
   color: var(--text);
-  line-height: 1.5;
+  line-height: 1.65;
+  font-size: 0.95rem;
   min-height: 100vh;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -285,7 +286,7 @@ body {
 .main-content {
   flex: 1;
   margin-left: var(--sidebar-w);
-  padding: 2rem 2.5rem;
+  padding: 2.5rem 3rem;
   max-width: calc(100vw - var(--sidebar-w));
 }
 
@@ -341,8 +342,8 @@ body {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 3px;
-  padding: 1.25rem 1.5rem;
-  margin-bottom: 1.25rem;
+  padding: 1.75rem 2rem;
+  margin-bottom: 1.75rem;
 }
 
 .section-title {
@@ -520,8 +521,8 @@ body {
 
 .results-table th {
   text-align: left;
-  padding: 0.5rem 0.75rem;
-  font-size: 0.65rem;
+  padding: 0.7rem 1rem;
+  font-size: 0.7rem;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -532,7 +533,7 @@ body {
 
 .results-table td {
   text-align: left;
-  padding: 0.5rem 0.75rem;
+  padding: 0.7rem 1rem;
   border-bottom: 1px solid var(--border-subtle);
   color: var(--text);
 }
@@ -565,13 +566,13 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.4rem 0.875rem;
+  padding: 0.5rem 1.1rem;
   border: 1px solid var(--border);
   border-radius: 2px;
   background: var(--surface);
   color: var(--text);
   font-family: var(--font-mono);
-  font-size: 0.75rem;
+  font-size: 0.8rem;
   letter-spacing: 0.02em;
   cursor: pointer;
   transition: border-color 0.1s, background 0.1s;
@@ -767,12 +768,12 @@ body {
 }
 
 .form-input {
-  padding: 0.4rem 0.625rem;
+  padding: 0.5rem 0.75rem;
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 2px;
   font-family: var(--font-mono);
-  font-size: 0.8rem;
+  font-size: 0.85rem;
   color: var(--text);
   transition: border-color 0.1s;
 }
