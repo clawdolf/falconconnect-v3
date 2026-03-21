@@ -499,8 +499,14 @@ export function buildLeads(rows, headers, columnMap, vendor, tier, leadType, lea
       if (isNaN(sa) || sa === 0) { delete lead.spouse_age } else { lead.spouse_age = sa }
     }
 
+    // Cheryl: strip fields that are her internal metrics, not meaningful for Close
+    if (vendor === 'Cheryl') {
+      delete lead.lead_type
+      delete lead.vendor_lead_id
+    }
+
     // Apply batch metadata (only when row doesn't have its own value)
-    if (leadType && !lead.lead_type) lead.lead_type = leadType
+    if (leadType && !lead.lead_type && vendor !== 'Cheryl') lead.lead_type = leadType
     if (leadAge && !lead.lead_age_bucket) lead.lead_age_bucket = leadAge
     if (purchaseDate && !lead.mail_date) lead.mail_date = purchaseDate
     // Cheryl: auto-assign tier from lead_received date (overrides file-level tier)
