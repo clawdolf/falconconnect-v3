@@ -509,12 +509,16 @@ export function buildLeads(rows, headers, columnMap, vendor, tier, leadType, lea
     if (leadType && !lead.lead_type && vendor !== 'Cheryl') lead.lead_type = leadType
     if (leadAge && !lead.lead_age_bucket) lead.lead_age_bucket = leadAge
     if (purchaseDate && !lead.mail_date) lead.mail_date = purchaseDate
-    // Cheryl: auto-assign lead_age_bucket from lead_received date (T1-T5 = age buckets, not tier)
-    if (vendor === 'Cheryl' && lead.lead_received) {
-      const cherylTier = getCherylTier(lead.lead_received)
-      if (cherylTier) lead.lead_age_bucket = cherylTier
+    // Cheryl: T1-T5 goes into tier (per-row from date), lead_age_bucket left blank
+    if (vendor === 'Cheryl') {
+      if (lead.lead_received) {
+        const cherylTier = getCherylTier(lead.lead_received)
+        if (cherylTier) lead.tier = cherylTier
+      }
+      delete lead.lead_age_bucket
+    } else {
+      if (tier && !lead.tier) lead.tier = tier
     }
-    if (tier && !lead.tier) lead.tier = tier
     // Build lead_source — Cheryl is always flat "Cheryl", no tier appended
     if (vendor && !lead.lead_source) {
       if (vendor === 'Cheryl') {
