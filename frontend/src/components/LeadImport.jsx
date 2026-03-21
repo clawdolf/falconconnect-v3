@@ -103,7 +103,8 @@ function LeadImport() {
       for (const file of fileList) {
         const { headers: hdrs, parsedRows: rows, sampleRow: sample } = await parseOneFile(file)
         const det = autoDetectVendor(file.name)
-        newQueue.push({ file, name: file.name, vendor: det.vendor, tier: det.tier, leadType: det.leadType, leadAge: det.leadAge || '', purchaseDate: '', status: 'pending', result: null, headers: hdrs, parsedRows: rows, sampleRow: sample })
+        const defaultLeadAge = det.leadAge || (NEEDS_LEAD_AGE[det.vendor] ? (VENDOR_AGE_BUCKETS[det.vendor] || [])[0] || '' : '')
+        newQueue.push({ file, name: file.name, vendor: det.vendor, tier: det.tier, leadType: det.leadType, leadAge: defaultLeadAge, purchaseDate: '', status: 'pending', result: null, headers: hdrs, parsedRows: rows, sampleRow: sample })
       }
       setFileQueue(newQueue)
       if (newQueue.length > 0) {
@@ -293,7 +294,7 @@ function LeadImport() {
       const map = getMapForFile(fi)
       const preview = buildLeads(fq.parsedRows.slice(0, 5), fq.headers, map, fq.vendor, fq.tier, fq.leadType, fq.leadAge, fq.purchaseDate, adjustAge)
       const full = buildLeads(fq.parsedRows, fq.headers, map, fq.vendor, fq.tier, fq.leadType, fq.leadAge, fq.purchaseDate, adjustAge)
-      return { name: fq.name, previewLeads: preview.leads, totalLeads: full.leads.length, droppedCount: full.droppedCount, vendor: fq.vendor, tier: fq.tier, leadType: fq.leadType }
+      return { name: fq.name, previewLeads: preview.leads, totalLeads: full.leads.length, droppedCount: full.droppedCount, vendor: fq.vendor, tier: fq.tier, leadType: fq.leadType, leadAge: fq.leadAge }
     })
   }, [step, fileQueue, columnMap, perFileMaps, applyMappingToAll, adjustAge])
   const totalLeadsAcrossFiles = useMemo(() => previewDataByFile.reduce((s, f) => s + f.totalLeads, 0), [previewDataByFile])
@@ -388,7 +389,7 @@ function LeadImport() {
                   <tr key={idx}>
                     <td style={{ fontFamily: 'var(--font-mono)', fontSize: '0.7rem', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={fq.name}>{fq.name.replace(/\.[^.]+$/, '')}</td>
                     <td>{fq.parsedRows.length}</td>
-                    <td><select className="form-input" style={{ fontSize: '0.7rem', padding: '0.2rem 0.4rem' }} value={fq.vendor} onChange={e => { const v = e.target.value; updateFileQueueItem(idx, { vendor: v, tier: (VENDOR_TIERS[v] || [])[0] || 'N/A' }) }}>{LEAD_VENDORS.map(v => <option key={v} value={v}>{v}</option>)}</select></td>
+                    <td><select className="form-input" style={{ fontSize: '0.7rem', padding: '0.2rem 0.4rem' }} value={fq.vendor} onChange={e => { const v = e.target.value; updateFileQueueItem(idx, { vendor: v, tier: (VENDOR_TIERS[v] || [])[0] || 'N/A', leadAge: NEEDS_LEAD_AGE[v] ? (VENDOR_AGE_BUCKETS[v] || [])[0] || '' : '' }) }}>{LEAD_VENDORS.map(v => <option key={v} value={v}>{v}</option>)}</select></td>
                     <td>{fq.vendor === 'Cheryl'
                       ? <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.65rem', color: 'var(--text-muted)', padding: '0.2rem 0.4rem', display: 'inline-block' }} title="Cheryl tier is auto-assigned per lead from the Date Lead Rcvd column">Auto (by date)</span>
                       : <select className="form-input" style={{ fontSize: '0.7rem', padding: '0.2rem 0.4rem' }} value={fq.tier} onChange={e => updateFileQueueItem(idx, { tier: e.target.value })} disabled={fq.vendor === 'Anne Proven Leads'}>{(VENDOR_TIERS[fq.vendor] || []).map(t => <option key={t} value={t}>{t}</option>)}</select>
@@ -523,7 +524,7 @@ function LeadImport() {
                       <thead><tr><th>#</th><th>Name</th><th>Phone</th><th>Source</th><th>Tier</th><th>Lead Age</th></tr></thead>
                       <tbody>
                         {previewDataByFile[previewTab].previewLeads.map((l, i) => (
-                          <tr key={i}><td>{i + 1}</td><td>{l.first_name} {l.last_name}</td><td>{l.phone}</td><td>{l.lead_source || '\u2014'}</td><td>{l.tier || '\u2014'}</td><td>{l.lead_age_bucket || '\u2014'}</td></tr>
+                          <tr key={i}><td>{i + 1}</td><td>{l.first_name} {l.last_name}</td><td>{l.phone}</td><td>{l.lead_source || '\u2014'}</td><td>{l.tier || '\u2014'}</td><td>{l.lead_age_bucket || previewDataByFile[previewTab].leadAge || '\u2014'}</td></tr>
                         ))}
                       </tbody>
                     </table>
