@@ -63,7 +63,15 @@ function LeadImport() {
     const PREFERRED_SHEETS = ['qryexportorder', 'data', 'leads', 'sheet1']
     const sheetName = wb.SheetNames.find(n => PREFERRED_SHEETS.includes(n.toLowerCase())) || wb.SheetNames[0]
     const sheet = wb.Sheets[sheetName]
-    let json = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false, dateNF: 'M/D/YYYY' })
+    // Use raw:true to get Date objects for date cells, then stringify with 4-digit years.
+    // raw:false with dateNF produces 2-digit years (e.g. "4/9/24") which break getCherylTier().
+    let json = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true })
+    json = json.map(row => row.map(cell => {
+      if (cell instanceof Date) {
+        return `${cell.getMonth() + 1}/${cell.getDate()}/${cell.getFullYear()}`
+      }
+      return cell === null || cell === undefined ? '' : cell
+    }))
     if (json.length < 2) throw new Error('"' + file.name + '" appears empty.')
 
     // Auto-detect transposed layout (fields as rows, leads as columns).
