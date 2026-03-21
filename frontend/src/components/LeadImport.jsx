@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, useMemo } from 'react'
+import { flushSync } from 'react-dom'
 import { useAuth } from '@clerk/clerk-react'
 import * as XLSX from 'xlsx'
 import {
@@ -226,9 +227,9 @@ function LeadImport() {
           }
         } catch { fileFailed += batch.length }
         processedLeads += batch.length
-        setProgress(prev => ({ ...prev, current: Math.min(processedLeads, totalLeads) }))
-        // yield to browser so React can flush + paint the progress bar before next batch
-        await new Promise(resolve => requestAnimationFrame(resolve))
+        flushSync(() => {
+          setProgress(prev => ({ ...prev, current: Math.min(processedLeads, totalLeads) }))
+        })
       }
       updateFileQueueItem(fi, { status: fileFailed > 0 && fileCreated === 0 ? 'error' : 'done', result: { created: fileCreated, failed: fileFailed, ghlWarnings: fileGhlWarnings, errors: fileErrors, droppedCount, droppedRows } })
       grandCreated += fileCreated; grandFailed += fileFailed; grandErrors.push(...fileErrors); grandGhlWarnings.push(...fileGhlWarnings)
