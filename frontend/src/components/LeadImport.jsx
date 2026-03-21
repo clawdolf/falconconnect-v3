@@ -520,10 +520,10 @@ function LeadImport() {
                 {previewDataByFile[previewTab].previewLeads.length > 0 && (
                   <div className="table-scroll-wrapper" style={{ maxHeight: 240, marginBottom: '1rem' }}>
                     <table className="results-table">
-                      <thead><tr><th>#</th><th>Name</th><th>Phone</th><th>Email</th><th>Source</th><th>Type</th></tr></thead>
+                      <thead><tr><th>#</th><th>Name</th><th>Phone</th><th>Source</th><th>Tier</th><th>Lead Age</th></tr></thead>
                       <tbody>
                         {previewDataByFile[previewTab].previewLeads.map((l, i) => (
-                          <tr key={i}><td>{i + 1}</td><td>{l.first_name} {l.last_name}</td><td>{l.phone}</td><td>{l.email || '\u2014'}</td><td>{l.lead_source || '\u2014'}</td><td>{l.lead_type || '\u2014'}</td></tr>
+                          <tr key={i}><td>{i + 1}</td><td>{l.first_name} {l.last_name}</td><td>{l.phone}</td><td>{l.lead_source || '\u2014'}</td><td>{l.tier || '\u2014'}</td><td>{l.lead_age_bucket || '\u2014'}</td></tr>
                         ))}
                       </tbody>
                     </table>
