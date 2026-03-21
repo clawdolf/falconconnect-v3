@@ -58,7 +58,11 @@ function LeadImport() {
     if (!['csv', 'xlsx', 'xls', 'tsv'].includes(ext)) throw new Error('Unsupported: .' + ext)
     const data = await file.arrayBuffer()
     const wb = XLSX.read(data, { type: 'array', cellDates: true })
-    const sheet = wb.Sheets[wb.SheetNames[0]]
+    // Prefer known data sheet names over default first sheet.
+    // Cheryl files have 'qryExportOrder' (data) + 'Call_Sheet' (transposed print layout).
+    const PREFERRED_SHEETS = ['qryexportorder', 'data', 'leads', 'sheet1']
+    const sheetName = wb.SheetNames.find(n => PREFERRED_SHEETS.includes(n.toLowerCase())) || wb.SheetNames[0]
+    const sheet = wb.Sheets[sheetName]
     let json = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false, dateNF: 'M/D/YYYY' })
     if (json.length < 2) throw new Error('"' + file.name + '" appears empty.')
 
