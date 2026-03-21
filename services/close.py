@@ -261,9 +261,11 @@ async def create_lead(lead_dict: dict) -> dict:
 
     contacts = [primary_contact]
 
-    # ── Spouse contact (if detected) ──
-    if spouse_name:
-        spouse_contact: Dict[str, Any] = {"name": spouse_name}
+    # ── Spouse contact (if detected from name split OR explicit spouse_name field) ──
+    explicit_spouse = (lead_dict.get("spouse_name") or "").strip()
+    resolved_spouse = explicit_spouse or spouse_name  # explicit field wins over name-split
+    if resolved_spouse:
+        spouse_contact: Dict[str, Any] = {"name": resolved_spouse}
         spouse_phone = normalize_phone(lead_dict.get("spouse_phone", ""))
         if spouse_phone:
             spouse_contact["phones"] = [{"phone": spouse_phone, "type": "mobile"}]

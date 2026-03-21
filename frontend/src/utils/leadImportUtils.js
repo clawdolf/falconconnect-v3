@@ -77,7 +77,8 @@ export const LEAD_FIELDS = [
   { value: 'dob', label: 'DOB (Full Date)' },
   { value: 'gender', label: 'Gender' },
 
-  // Spouse
+  // Spouse / Co-borrower
+  { value: 'spouse_name', label: 'Spouse / Co-Borrower Name' },
   { value: 'spouse_dob', label: 'Spouse DOB' },
   { value: 'spouse_age', label: 'Spouse Age' },
 
@@ -202,18 +203,41 @@ export const COLUMN_ALIASES = {
   'vendor lead id': 'vendor_lead_id', 'vendor_lead_id': 'vendor_lead_id',
   'external id': 'vendor_lead_id', 'external_id': 'vendor_lead_id',
   'orderid': 'vendor_lead_id',
+  'mortagage id': 'vendor_lead_id', 'mortgage id': 'vendor_lead_id', 'mortgageid': 'vendor_lead_id',  // Aria vendor
 
   // ── Flags ──
   'tobacco': 'tobacco', 'tobacco?': 'tobacco', 'tobaccouse': 'tobacco',
   'smoker': 'tobacco', 'borrowertobaccouse': 'tobacco',
   'tobacco 1': 'tobacco', 'tobacco1': 'tobacco',  // Cheryl vendor format
+  'borrower tobacco use': 'tobacco', 'borrower tobacco': 'tobacco',  // Aria vendor
   'medical': 'medical', 'medical issues': 'medical', 'medicalissues': 'medical',
   'medical issues?': 'medical', 'borrowermedicalissues': 'medical',
   'preexistingconditions': 'medical',
+  'borrower medical conditions': 'medical', 'borrower medical': 'medical',  // Aria vendor
   'spanish': 'spanish', 'spanish?': 'spanish',
 
   // ── Gender ──
   'gender': 'gender', 'sex': 'gender', 'genderidentity': 'gender', 'gender_identity': 'gender',
+
+  // ── Spouse / Co-borrower Name ──
+  'spouse name': 'spouse_name', 'spouse_name': 'spouse_name',
+  'co-borrower name': 'spouse_name', 'coborrower name': 'spouse_name',
+  'co borrower name': 'spouse_name', 'coborrower': 'spouse_name',
+  'co-borrower': 'spouse_name', 'coapplicant': 'spouse_name',
+  'co applicant': 'spouse_name', 'co-applicant': 'spouse_name',
+
+  // ── Aria-specific phone aliases ──
+  'call in phone number': 'phone', 'callinphonenumber': 'phone',  // Aria primary phone
+  'borrower phone number': 'home_phone', 'borrowerphonenumber': 'home_phone',  // Aria secondary phone
+
+  // ── Aria-specific date aliases ──
+  'sale date': 'mail_date', 'saledate': 'mail_date',  // Aria — closest to mail_date
+
+  // ── Aria-specific demographic aliases ──
+  'borrower age': 'age', 'borrowerage': 'age',
+
+  // ── Loan/mortgage aliases ──
+  'mortgage amount': 'loan_amount', 'mortgageamount': 'loan_amount',
 }
 
 
