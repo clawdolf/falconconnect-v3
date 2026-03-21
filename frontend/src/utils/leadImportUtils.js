@@ -459,6 +459,14 @@ export function buildLeads(rows, headers, columnMap, vendor, tier, leadType, lea
       delete lead.full_name
     }
 
+    // Title-case names and location fields (handles ALL CAPS from Cheryl + others)
+    const toTitleCase = s => s ? String(s).trim().replace(/\w\S*/g, w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()) : s
+    if (lead.first_name) lead.first_name = toTitleCase(lead.first_name)
+    if (lead.last_name) lead.last_name = toTitleCase(lead.last_name)
+    if (lead.city) lead.city = toTitleCase(lead.city)
+    if (lead.county) lead.county = toTitleCase(lead.county)
+    if (lead.address) lead.address = toTitleCase(lead.address)
+
     // Normalize gender to Close.com choices (M/F)
     if (lead.gender) {
       const g = String(lead.gender).trim().toLowerCase()
