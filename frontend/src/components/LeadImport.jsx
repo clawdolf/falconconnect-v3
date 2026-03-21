@@ -57,10 +57,26 @@ function LeadImport() {
     const ext = file.name.split('.').pop().toLowerCase()
     if (!['csv', 'xlsx', 'xls', 'tsv'].includes(ext)) throw new Error('Unsupported: .' + ext)
     const data = await file.arrayBuffer()
-    const wb = XLSX.read(data, { type: 'array' })
+    const wb = XLSX.read(data, { type: 'array', cellDates: true })
     const sheet = wb.Sheets[wb.SheetNames[0]]
-    const json = XLSX.utils.sheet_to_json(sheet, { header: 1 })
+    let json = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false, dateNF: 'M/D/YYYY' })
     if (json.length < 2) throw new Error('"' + file.name + '" appears empty.')
+
+    // Auto-detect transposed layout (fields as rows, leads as columns).
+    // Cheryl and some other vendors export this way. Detect by checking if
+    // the first row contains only numeric or blank values while col 0 of row 1
+    // looks like a field name (e.g. "FIRST NAME", "LAST NAME").
+    const firstRowAllNumericOrBlank = json[0].every(v => v === '' || v === null || v === undefined || /^\d+$/.test(String(v).trim()))
+    const secondRowFirstCellIsLabel = json.length > 1 && /^[A-Z ]{3,}$/.test(String(json[1][0] || '').trim())
+    if (firstRowAllNumericOrBlank && secondRowFirstCellIsLabel) {
+      // Transpose: rows become columns, columns become rows
+      const maxCols = Math.max(...json.map(r => r.length))
+      const transposed = Array.from({ length: maxCols }, (_, ci) =>
+        json.map(row => (row[ci] !== undefined && row[ci] !== null) ? String(row[ci]).trim() : '')
+      )
+      json = transposed
+    }
+
     const hdrs = json[0].map(h => String(h || '').trim())
     const rows = json.slice(1).filter(r => r.some(c => c !== null && c !== undefined && c !== ''))
     return { headers: hdrs, parsedRows: rows, sampleRow: rows[0] || [] }
