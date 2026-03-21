@@ -58,9 +58,9 @@ class BulkLeadItem(BaseModel):
     dob: Optional[str] = None
     best_time_to_call: Optional[str] = Field(None, max_length=256)
     gender: Optional[str] = Field(None, max_length=32)
-    tobacco: Optional[bool] = None
-    medical: Optional[bool] = None
-    spanish: Optional[bool] = None
+    tobacco: Optional[str] = Field(None, max_length=32)    # "Yes"/"No" from frontend
+    medical: Optional[str] = Field(None, max_length=256)   # Free text or "Yes"/"No" from frontend
+    spanish: Optional[str] = Field(None, max_length=32)    # "Yes"/"No" from frontend
     lead_received: Optional[str] = None       # Date lead was received by vendor (ISO string)
     vendor_lead_id: Optional[str] = Field(None, max_length=64)  # Vendor's own lead ID
 
@@ -143,14 +143,21 @@ async def bulk_import_leads(
                 close_lead_id = close_result["id"]
             except Exception as exc:
                 failed += 1
+                # Extract response body from httpx errors for diagnosability
+                error_detail = str(exc)
+                if hasattr(exc, 'response') and exc.response is not None:
+                    try:
+                        error_detail = f"{exc} | Response: {exc.response.text[:500]}"
+                    except Exception:
+                        pass
                 errors.append(
                     BulkImportError(
                         index=idx,
-                        error=f"Close.com write failed: {exc}",
+                        error=f"Close.com write failed: {error_detail}",
                         lead_name=lead_name,
                     )
                 )
-                logger.warning("Bulk import — Close failed for %s: %s", lead_name, exc)
+                logger.warning("Bulk import — Close failed for %s: %s", lead_name, error_detail)
                 continue
 
             # ── STEP 2: Add note if present (non-fatal) ──

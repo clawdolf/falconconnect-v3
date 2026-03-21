@@ -31,21 +31,25 @@ DEFAULT_STATUS_ID = "stat_FncoFJQfuuXdXbNx0HbwsKVR7EA95OhoQmqEPNMXl7T"  # "New L
 # ── Phone normalization ──
 
 
-def normalize_phone(raw: str) -> str:
+def normalize_phone(raw) -> str:
     """Normalize a phone number to +1XXXXXXXXXX (E.164 US).
 
     Strips all non-digit chars, prepends +1 if missing.
     Returns empty string if result doesn't look like a valid US number.
+    Handles None, empty strings, numeric values, and "None" strings gracefully.
     """
-    if not raw:
+    if raw is None:
         return ""
-    digits = re.sub(r"[^\d]", "", str(raw).strip())
+    raw_str = str(raw).strip()
+    if not raw_str or raw_str.lower() == "none":
+        return ""
+    digits = re.sub(r"[^\d]", "", raw_str)
     if len(digits) == 11 and digits.startswith("1"):
         return f"+{digits}"
     if len(digits) == 10:
         return f"+1{digits}"
     if len(digits) >= 10:
-        return f"+{digits}" if not raw.startswith("+") else raw.strip()
+        return f"+{digits}" if not raw_str.startswith("+") else raw_str
     return ""
 
 
@@ -349,13 +353,20 @@ async def create_lead(lead_dict: dict) -> dict:
     if gender:
         _set_cf("Gender", gender)
 
-    # Boolean-as-string fields (choices: Yes/No)
-    if lead_dict.get("tobacco") is not None:
-        _set_cf("Tobacco", "Yes" if lead_dict["tobacco"] else "No")
-    if lead_dict.get("medical") is not None:
-        _set_cf("Medical Issues", "Yes" if lead_dict["medical"] else "No")
-    if lead_dict.get("spanish") is not None:
-        _set_cf("Spanish", "Yes" if lead_dict["spanish"] else "No")
+    # Choice fields (Yes/No) — frontend sends string "Yes"/"No"
+    if lead_dict.get("tobacco"):
+        val = str(lead_dict["tobacco"]).strip()
+        _set_cf("Tobacco", "Yes" if val.lower() in ("yes", "true", "1", "y") else "No")
+    if lead_dict.get("medical"):
+        val = str(lead_dict["medical"]).strip()
+        # Medical Issues: if it's just Yes/No, set as choice; if it's descriptive text, set as-is
+        if val.lower() in ("yes", "true", "1", "y", "no", "false", "0", "n"):
+            _set_cf("Medical Issues", "Yes" if val.lower() in ("yes", "true", "1", "y") else "No")
+        else:
+            _set_cf("Medical Issues", val)
+    if lead_dict.get("spanish"):
+        val = str(lead_dict["spanish"]).strip()
+        _set_cf("Spanish", "Yes" if val.lower() in ("yes", "true", "1", "y") else "No")
 
     # Spouse flag
     if spouse_name:
@@ -436,6 +447,17 @@ async def _post_with_retry(
             )
             await asyncio.sleep(retry_after)
             continue
+        if resp.status_code >= 400:
+            # Log the response body for diagnosability before raising
+            try:
+                error_body = resp.text
+            except Exception:
+                error_body = "<unreadable>"
+            logger.error(
+                "Close API %d for %s — body: %s | payload keys: %s",
+                resp.status_code, url, error_body[:1000],
+                list(payload.keys()),
+            )
         resp.raise_for_status()
         return resp.json()
 

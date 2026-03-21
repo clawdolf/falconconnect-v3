@@ -353,8 +353,18 @@ function normalizeDateValue(val) {
   const s = String(val).trim()
   // Already YYYY-MM-DD
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s
-  // M/D/YYYY or M/D/YY — pass through, backend handles these
-  if (/^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(s)) return s
+  // M/D/YYYY — convert to YYYY-MM-DD (required for getCherylTier and backend consistency)
+  const mdyFull = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
+  if (mdyFull) {
+    return `${mdyFull[3]}-${mdyFull[1].padStart(2, '0')}-${mdyFull[2].padStart(2, '0')}`
+  }
+  // M/D/YY — convert to YYYY-MM-DD with century correction
+  const mdyShort = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2})$/)
+  if (mdyShort) {
+    const yr = parseInt(mdyShort[3], 10)
+    const fullYear = yr >= 50 ? 1900 + yr : 2000 + yr
+    return `${fullYear}-${mdyShort[1].padStart(2, '0')}-${mdyShort[2].padStart(2, '0')}`
+  }
   // Excel serial date number (integer > 100 and < 200000, no other chars)
   const n = Number(s)
   if (Number.isFinite(n) && n > 100 && n < 200000 && /^\d+$/.test(s)) {
