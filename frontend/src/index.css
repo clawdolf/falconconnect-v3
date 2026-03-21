@@ -5,14 +5,14 @@
 :root {
   /* ── Surface system ── */
   --bg: oklch(8% 0.005 240);
-  --surface: oklch(12% 0.008 240);
-  --surface-hover: oklch(14% 0.008 240);
-  --border: oklch(20% 0.01 240);
-  --border-subtle: oklch(16% 0.008 240);
+  --surface: oklch(13% 0.01 240);
+  --surface-hover: oklch(16% 0.01 240);
+  --border: oklch(26% 0.012 240);
+  --border-subtle: oklch(20% 0.01 240);
 
   /* ── Text ── */
-  --text: oklch(92% 0.005 240);
-  --text-muted: oklch(55% 0.008 240);
+  --text: oklch(95% 0.004 240);
+  --text-muted: oklch(68% 0.01 240);
 
   /* ── Accent ── */
   --accent: oklch(78% 0.15 85);
