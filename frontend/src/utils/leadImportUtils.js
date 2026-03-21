@@ -60,9 +60,8 @@ export const LEAD_FIELDS = [
   { value: 'last_name', label: 'Last Name' },
 
   // Phone
-  { value: 'phone', label: 'Phone' },
-  { value: 'home_phone', label: 'Home Phone' },
-  { value: 'mobile_phone', label: 'Mobile Phone' },
+  { value: 'phone', label: 'Phone (Primary)' },
+  { value: 'home_phone', label: 'Phone 2 (Secondary)' },
   { value: 'spouse_phone', label: 'Spouse Phone' },
 
   // Contact
@@ -120,18 +119,20 @@ export const COLUMN_ALIASES = {
   'last': 'last_name', 'borrowerlastname': 'last_name', 'applicantlastname': 'last_name',
   'clientlastname': 'last_name', 'primarylastname': 'last_name',
 
-  // ── Phone — primary (maps to `phone` which backend requires) ──
-  // NOTE: 'mobile phone' and 'mobilephone' intentionally map to `phone` (primary),
-  // NOT mobile_phone, because most vendor files label their only phone as "Mobile Phone"
-  'phone': 'phone', 'phone1': 'phone', 'primaryphone': 'phone',
-  'cell': 'phone', 'cell phone': 'phone', 'cellphone': 'phone',
+  // ── Phone — primary ──
+  // Any single-phone column (mobile, cell, home, phone1) maps to primary.
+  // "Home Phone" / "Mobile Phone" distinction is meaningless on lead forms — people put whatever.
+  'phone': 'phone', 'phone1': 'phone', 'primaryphone': 'phone', 'primary phone': 'phone',
+  'cell': 'phone', 'cell phone': 'phone', 'cellphone': 'phone', 'cell_phone': 'phone',
   'mobile': 'phone', 'mphone': 'phone',
   'mobile phone': 'phone', 'mobilephone': 'phone', 'mobile_phone': 'phone',
 
   // ── Phone — secondary ──
+  // ── Phone 2 (secondary slot — home_phone field) ──
   'home phone': 'home_phone', 'home_phone': 'home_phone', 'homephone': 'home_phone',
   'landline': 'home_phone', 'recentlandline1': 'home_phone',
   'phone2': 'home_phone', 'secondaryphone': 'home_phone', 'hphone': 'home_phone',
+  'secondary phone': 'home_phone', 'alternate phone': 'home_phone', 'alt phone': 'home_phone',
   'spouse phone': 'spouse_phone', 'spouse_phone': 'spouse_phone',
   'spousephone': 'spouse_phone', 'spouse cell': 'spouse_phone',
 
@@ -237,7 +238,7 @@ export const STEP_LABELS = {
 /** Check if a column map satisfies minimum requirements for import */
 export function isMappingValid(columnMap) {
   const vals = Object.values(columnMap).filter(Boolean)
-  const hasPhone = vals.includes('phone') || vals.includes('mobile_phone') || vals.includes('home_phone')
+  const hasPhone = vals.includes('phone') || vals.includes('home_phone')
   const hasName = (vals.includes('first_name') && vals.includes('last_name')) || vals.includes('full_name')
   const hasDupes = getDuplicateMappings(columnMap).length > 0
   return hasPhone && hasName && !hasDupes
@@ -248,7 +249,7 @@ export function getMissingRequired(columnMap) {
   const vals = Object.values(columnMap).filter(Boolean)
   const missing = []
   const hasName = (vals.includes('first_name') && vals.includes('last_name')) || vals.includes('full_name')
-  const hasPhone = vals.includes('phone') || vals.includes('mobile_phone') || vals.includes('home_phone')
+  const hasPhone = vals.includes('phone') || vals.includes('home_phone')
   if (!hasName) missing.push('Name (First + Last, or Full Name)')
   if (!hasPhone) missing.push('Phone')
   return missing
@@ -260,7 +261,7 @@ export function getMissingRequired(columnMap) {
  * first_name/last_name/full_name are allowed to overlap (name split path).
  */
 export function getDuplicateMappings(columnMap) {
-  const ALLOWED_DUPES = new Set(['phone', 'home_phone', 'mobile_phone', 'first_name', 'last_name', 'full_name'])
+  const ALLOWED_DUPES = new Set(['phone', 'home_phone', 'first_name', 'last_name', 'full_name'])
   const counts = {}
   Object.values(columnMap).forEach(v => {
     if (v && !ALLOWED_DUPES.has(v)) counts[v] = (counts[v] || 0) + 1
@@ -269,7 +270,7 @@ export function getDuplicateMappings(columnMap) {
 }
 
 /** Required field keys that must be present in mapping */
-export const REQUIRED_FIELD_KEYS = ['first_name', 'last_name', 'full_name', 'phone', 'mobile_phone', 'home_phone']
+export const REQUIRED_FIELD_KEYS = ['first_name', 'last_name', 'full_name', 'phone', 'home_phone']
 
 
 // ═══════════════════════════════════════════════
@@ -474,9 +475,16 @@ export function buildLeads(rows, headers, columnMap, vendor, tier, leadType, lea
       else delete lead.gender  // Close only accepts M or F
     }
 
-    // Phone fallback: if phone not mapped directly, promote mobile_phone or home_phone
-    if (!lead.phone && lead.mobile_phone) lead.phone = lead.mobile_phone
-    if (!lead.phone && lead.home_phone) lead.phone = lead.home_phone
+    // Phone promotion: if primary is empty, pull from secondary slot
+    // Also: if only one phone column exists in the entire file, it's always primary
+    if (!lead.phone && lead.home_phone) {
+      lead.phone = lead.home_phone
+      delete lead.home_phone
+    }
+    if (!lead.phone && lead.mobile_phone) {
+      lead.phone = lead.mobile_phone
+      delete lead.mobile_phone
+    }
 
     // Normalize date fields — SheetJS may return Excel serial numbers or Date objects
     // instead of strings, which would fail backend parsing. Convert to YYYY-MM-DD.
