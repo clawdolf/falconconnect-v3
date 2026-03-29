@@ -281,6 +281,23 @@ async def lifespan(app: FastAPI):
     # Alembic migrations ran at build time; this is a fast safety net only.
     await init_db()
 
+    # Idempotent schema patches — run after create_all to add columns alembic may have missed
+    # (handles cases where alembic upgrade fails due to multiple-heads but app still starts)
+    from sqlalchemy import text as _text
+    from db.database import _get_engine
+    _engine = _get_engine()
+    async with _engine.begin() as _conn:
+        # Migration 015: add close_lead_id to lead_xref
+        await _conn.execute(_text("""
+            ALTER TABLE lead_xref ADD COLUMN IF NOT EXISTS close_lead_id VARCHAR(64);
+        """))
+        # Ensure index exists (IF NOT EXISTS requires PG 9.5+, Render uses PG 16)
+        await _conn.execute(_text("""
+            CREATE INDEX IF NOT EXISTS ix_lead_xref_close_lead_id
+            ON lead_xref (close_lead_id);
+        """))
+    logger.info("STARTUP: idempotent schema patches applied (close_lead_id column ensured)")
+
     # Fix agents.user_id mismatch before seeding/deduping licenses
     await _fix_agent_user_id()
 
