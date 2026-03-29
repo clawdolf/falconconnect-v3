@@ -1,6 +1,7 @@
 """Lead capture & bulk import.
 
-All writes go to Close.com (primary CRM) + GHL (RVM pipeline only).
+Bulk import writes to Close.com (primary CRM).
+Single capture (capture_lead) still writes to Notion → GHL (separate migration).
 """
 
 import asyncio
@@ -17,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from db.database import get_session
 from db.models import LeadXref
 from middleware.auth import require_auth
-from services import close, ghl
+from services import close, ghl, notion
 from services.ghl import normalize_phone, split_phone_field
 from utils.age import calculate_age, calculate_lage
 
@@ -266,12 +267,13 @@ async def capture_lead(
     payload: LeadPayload,
     user=Depends(require_auth),
 ):
-    """Capture a new lead — Close.com first, then GHL (RVM pipeline).
+    """Capture a new lead — Notion first, then GHL.
 
     1. Calculate age from birth_year and lage_months from mail_date.
-    2. Create lead in Close.com (primary CRM).
-    3. Upsert contact in GHL with r0-pending tag (RVM pipeline).
-    4. Return IDs and calculated fields.
+    2. Upsert lead page in Notion (source of truth).
+    3. Upsert contact + create opportunity in GHL (automations).
+    4. Update Notion with GHL contact ID cross-reference.
+    5. Return IDs and calculated fields.
     """
     lead_dict = payload.model_dump()
 
@@ -285,44 +287,71 @@ async def capture_lead(
         calculate_lage(payload.mail_date.isoformat()) if payload.mail_date else None
     )
 
-    # --- STEP 1: Close.com (primary CRM) ---
-    close_lead_id = ""
+    # --- STEP 1: Notion FIRST ---
     try:
-        close_result = await close.create_lead(lead_dict)
-        close_lead_id = close_result["id"]
+        notion_result = await notion.upsert_lead(
+            lead_dict,
+            ghl_contact_id="",
+            age=age,
+            lage_months=lage_months,
+        )
+        notion_page_id = notion_result["page_id"]
     except Exception as exc:
-        logger.error("Close create_lead failed: %s", exc)
+        logger.error("Notion upsert_lead failed: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Failed to push lead to Close: {exc}",
+            detail=f"Failed to push lead to Notion: {exc}",
         )
 
-    # Add note if present (non-fatal)
-    if lead_dict.get("notes"):
-        try:
-            await close.add_note(close_lead_id, lead_dict["notes"])
-        except Exception as note_exc:
-            logger.warning("Close note failed (non-fatal): %s", note_exc)
-
-    # --- STEP 2: GHL (RVM pipeline) ---
+    # --- STEP 2: GHL SECOND ---
     ghl_contact_id = ""
     try:
-        ghl_lead = lead_dict.copy()
-        ghl_lead["tags"] = ["r0-pending"]
-        ghl_contact = await ghl.upsert_contact(ghl_lead)
+        ghl_contact = await ghl.upsert_contact(lead_dict)
         ghl_contact_id = ghl_contact.get("id", "")
+
+        # Create opportunity
+        try:
+            opp_name = f"{payload.first_name} {payload.last_name} — {payload.lead_source or payload.source or 'web'}"
+            await ghl.create_opportunity(
+                ghl_contact_id,
+                stage_name="New Lead",
+                name=opp_name,
+            )
+        except Exception as exc:
+            logger.warning("GHL create_opportunity failed (non-fatal): %s", exc)
+
+        # Update Notion with GHL ID → write to "GHL ID" field (bare ID, no prefix)
+        if ghl_contact_id:
+            try:
+                notes = lead_dict.get("notes", "")
+                props: dict = {
+                    "GHL ID": {
+                        "rich_text": [{"text": {"content": ghl_contact_id}}]
+                    }
+                }
+                if notes:
+                    existing_comments = await notion._read_aggregate_comments(notion_page_id)
+                    merged = notes if not existing_comments else f"{existing_comments} | {notes}"
+                    props["Aggregate Comments"] = {
+                        "rich_text": [{"text": {"content": merged}}]
+                    }
+                await notion.update_page(notion_page_id, props)
+            except Exception:
+                pass
+
     except Exception as exc:
-        logger.warning("GHL upsert_contact failed (lead in Close): %s", exc)
+        # GHL failed but lead is in Notion — log warning, don't fail
+        logger.warning("GHL upsert_contact failed (lead in Notion): %s", exc)
 
     logger.info(
-        "Lead captured: %s %s → Close:%s / GHL:%s",
+        "Lead captured: %s %s → Notion:%s / GHL:%s",
         payload.first_name, payload.last_name,
-        close_lead_id, ghl_contact_id or "FAILED",
+        notion_page_id, ghl_contact_id or "FAILED",
     )
 
     return LeadCaptureResponse(
         ghl_id=ghl_contact_id,
-        notion_id="",  # Notion deprecated — kept for API compat
+        notion_id=notion_page_id,
         age=age,
         lage_months=lage_months,
     )

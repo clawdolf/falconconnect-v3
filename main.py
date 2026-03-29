@@ -1,4 +1,4 @@
-"""FalconConnect v3 — lead middleware layer. Close.com (primary CRM) + GHL (RVM only)."""
+"""FalconConnect v3 — middleware layer for dual GHL + Notion sync."""
 
 import asyncio
 import logging
@@ -10,11 +10,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from db.database import init_db
-from routers import leads, calendar, analytics, admin, licenses, agents, campaigns, ad_leads, close_webhooks, close_lead_status, conference
+from routers import leads, webhooks, calendar, analytics, admin, sync, licenses, agents, campaigns, ad_leads, close_webhooks, close_lead_status, conference
 from routers import ghl_cadence, cadence_sms
 from routers.sheets import router as sheets_router
 from routers.sms_templates import router as sms_templates_router
-
+from services.notion_ghl_sync import sync_loop
 
 logging.basicConfig(
     level=logging.INFO,
@@ -318,15 +318,26 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         logger.error("STARTUP GCal validation crashed: %s", exc)
 
+    # Start background Notion → GHL sync loop (disabled 2026-03-15 — was blocking app startup)
+    # sync_task = asyncio.create_task(sync_loop())
+    # logger.info("Notion→GHL background sync task started")
+    sync_task = None  # placeholder for shutdown logic
+
     yield
 
     # Shutdown
+    if sync_task:
+        sync_task.cancel()
+        try:
+            await sync_task
+        except asyncio.CancelledError:
+            pass
     logger.info("FalconConnect v3 shutting down …")
 
 
 app = FastAPI(
     title="FalconConnect v3",
-    description="Lead middleware: Close.com CRM, GHL RVM pipeline, SMS cadence, conference bridge.",
+    description="Middleware layer: dual GHL + Notion sync, iCal feed, analytics hub.",
     version="3.1.0",
     lifespan=lifespan,
 )
@@ -356,7 +367,8 @@ async def root_health():
         "service": "FalconConnect v3",
         "version": "3.1.0",
         "clerk_configured": bool(settings.clerk_secret_key),
-
+        "sync_enabled": settings.notion_ghl_sync_enabled,
+        "sync_dry_run": settings.notion_ghl_sync_dry_run,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -433,9 +445,11 @@ async def debug_env():
 # API routers
 # BUG 11 FIX: Leads moved from /api/public to /api (requires Clerk auth)
 app.include_router(leads.router, prefix="/api", tags=["Leads"])
+app.include_router(webhooks.router, prefix="/api/webhooks", tags=["Webhooks"])
 app.include_router(calendar.router, prefix="/api/calendar", tags=["Calendar"])
 app.include_router(analytics.router, prefix="/api/analytics", tags=["Analytics"])
 app.include_router(admin.router, prefix="/api/admin", tags=["Admin"])
+app.include_router(sync.router, prefix="/api/sync", tags=["Sync"])
 app.include_router(licenses.router, prefix="/api/licenses", tags=["Licenses"])
 app.include_router(agents.router, prefix="/api/public", tags=["Agents"])
 app.include_router(ad_leads.router, prefix="/api/public", tags=["Ad Leads"])
