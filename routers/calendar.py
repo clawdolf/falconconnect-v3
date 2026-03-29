@@ -1,13 +1,9 @@
-"""iCal feed endpoints — appointments and follow-ups via Google Calendar.
+"""iCal feed endpoints — two separate feeds for appointments and follow-ups.
 
 /api/calendar/appointments.ics — timed appointment events only
 /api/calendar/followups.ics    — all-day follow-up events only
 
 Both secured by the same CALENDAR_SECRET query param.
-
-NOTE: These endpoints previously sourced data from Notion (deprecated 2026-03-29).
-They now return empty feeds. GCal is the canonical calendar source — iCal feeds
-can be rebuilt from GCal data if needed.
 """
 
 import logging
@@ -15,6 +11,7 @@ import logging
 from fastapi import APIRouter, Query, Response
 
 from services.calendar import build_appointments_feed, build_followups_feed
+from services.notion import get_upcoming_appointments, get_upcoming_followups
 from utils.auth import verify_calendar_token
 
 logger = logging.getLogger("falconconnect.calendar")
@@ -24,17 +21,22 @@ router = APIRouter()
 
 @router.get("/appointments.ics")
 async def appointments_feed(token: str = Query(..., description="Calendar feed secret token")):
-    """iCal feed of upcoming appointments.
+    """iCal feed of upcoming appointments only.
 
-    NOTE: Notion data source removed (2026-03-29). Returns empty feed.
-    Use Google Calendar directly for appointment data.
+    1-hour timed events with 60-min and 24-hour VALARM reminders.
+    Calendar name: "FC Appointments — Seb"
     """
     verify_calendar_token(token)
 
-    # Notion was the data source — now deprecated. Return empty feed.
-    logger.info("Appointments feed requested — returning empty (Notion removed)")
+    try:
+        pages = await get_upcoming_appointments(days=90)
+        logger.info("Appointments feed: %d events", len(pages))
+    except Exception as exc:
+        logger.error("Failed to query Notion for appointments: %s", exc)
+        return Response(content="Error fetching appointment data", status_code=502, media_type="text/plain")
+
     return Response(
-        content=build_appointments_feed([]),
+        content=build_appointments_feed(pages),
         media_type="text/calendar",
         headers={
             "Content-Disposition": "inline; filename=appointments.ics",
@@ -45,17 +47,22 @@ async def appointments_feed(token: str = Query(..., description="Calendar feed s
 
 @router.get("/followups.ics")
 async def followups_feed(token: str = Query(..., description="Calendar feed secret token")):
-    """iCal feed of upcoming follow-ups.
+    """iCal feed of upcoming follow-ups only.
 
-    NOTE: Notion data source removed (2026-03-29). Returns empty feed.
-    Use Google Calendar directly for follow-up data.
+    All-day events with 8am morning VALARM reminder.
+    Calendar name: "FC Follow-Ups — Seb"
     """
     verify_calendar_token(token)
 
-    # Notion was the data source — now deprecated. Return empty feed.
-    logger.info("Follow-ups feed requested — returning empty (Notion removed)")
+    try:
+        pages = await get_upcoming_followups(days=90)
+        logger.info("Follow-ups feed: %d events", len(pages))
+    except Exception as exc:
+        logger.error("Failed to query Notion for follow-ups: %s", exc)
+        return Response(content="Error fetching follow-up data", status_code=502, media_type="text/plain")
+
     return Response(
-        content=build_followups_feed([]),
+        content=build_followups_feed(pages),
         media_type="text/calendar",
         headers={
             "Content-Disposition": "inline; filename=followups.ics",

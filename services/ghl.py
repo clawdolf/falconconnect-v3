@@ -1,6 +1,4 @@
-"""GoHighLevel API client — contacts, opportunities, RVM pipeline.
-
-GHL is used for RVM (ringless voicemail) only. Close.com is the primary CRM.
+"""GoHighLevel API client — contacts, opportunities, appointments.
 
 GHL API base: https://services.leadconnectorhq.com
 Auth: Bearer token + Version header.
@@ -85,8 +83,25 @@ GHL_CF_HPHONE = "za04O6KtX9Sg3yn8csZi"
 
 
 # ── Phone normalization utilities ──
-# Canonical implementation is in services/close.py — re-exported here for callers
-from services.close import normalize_phone  # noqa: F401
+
+
+def normalize_phone(raw: str) -> str:
+    """Normalize a phone number to E.164 format (+1XXXXXXXXXX for US).
+
+    Strips dashes, spaces, dots, parentheses. Adds +1 if missing.
+    Returns empty string if input is not a valid-looking US number.
+    """
+    if not raw:
+        return ""
+    digits = re.sub(r"[^\d]", "", raw.strip())
+    if len(digits) == 11 and digits.startswith("1"):
+        return f"+{digits}"
+    if len(digits) == 10:
+        return f"+1{digits}"
+    # Already has country code or non-standard length — return as-is with +
+    if len(digits) >= 10:
+        return f"+{digits}" if not digits.startswith("+") else digits
+    return ""
 
 
 def split_phone_field(raw: str) -> List[str]:
@@ -362,6 +377,200 @@ async def create_opportunity(
         return opp
 
 
+async def get_contact_appointments(
+    contact_id: str,
+    calendar_id: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """Fetch existing appointments for a GHL contact.
 
-# Appointment management and Notion phone sync functions removed 2026-03-29.
-# GHL is RVM-only — appointments handled via GCal/Close.
+    Returns list of appointment dicts. Filters to the specified calendar if provided.
+    """
+    settings = get_settings()
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.get(
+            f"{GHL_BASE}/contacts/{contact_id}/appointments",
+            headers=_headers(),
+        )
+        if resp.status_code == 404:
+            return []
+        resp.raise_for_status()
+        appointments = resp.json().get("events", resp.json().get("appointments", []))
+
+        # Filter to the target calendar if specified
+        if calendar_id:
+            appointments = [
+                a for a in appointments
+                if a.get("calendarId") == calendar_id
+            ]
+        return appointments
+
+
+async def cancel_appointment(appointment_id: str) -> bool:
+    """Cancel/delete a GHL appointment by ID.
+
+    Returns True if successfully cancelled, False on failure.
+    """
+    async with httpx.AsyncClient(timeout=30) as client:
+        # Try to update status to cancelled first
+        try:
+            resp = await client.put(
+                f"{GHL_BASE}/calendars/events/appointments/{appointment_id}",
+                headers=_headers(),
+                json={"appointmentStatus": "cancelled"},
+            )
+            if resp.status_code in (200, 204):
+                logger.info("GHL appointment %s cancelled", appointment_id)
+                return True
+        except Exception:
+            pass
+
+        # Fallback: try DELETE
+        try:
+            resp = await client.delete(
+                f"{GHL_BASE}/calendars/events/appointments/{appointment_id}",
+                headers=_headers(),
+            )
+            if resp.status_code in (200, 204):
+                logger.info("GHL appointment %s deleted", appointment_id)
+                return True
+        except Exception as e:
+            logger.warning("Failed to cancel/delete appointment %s: %s", appointment_id, e)
+
+    return False
+
+
+async def upsert_appointment(
+    contact_id: str,
+    start_time: str,
+    title: str,
+    calendar_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Create or reschedule a calendar appointment in GHL.
+
+    Bug 1 fix: Before creating, check for existing appointments for this
+    contact on the same date. If found, cancel the old one first (reschedule
+    pattern). This prevents duplicate appointments.
+
+    Args:
+        contact_id: GHL contact ID.
+        start_time: ISO-8601 datetime string.
+        title: Appointment title.
+        calendar_id: Override the default calendar.
+
+    Returns the appointment object from GHL.
+    """
+    settings = get_settings()
+    cal_id = calendar_id or settings.ghl_calendar_id
+
+    # End time is 1 hour after start
+    from dateutil import parser as dtparser
+    from datetime import timedelta
+    start_dt = dtparser.parse(start_time)
+    end_dt = start_dt + timedelta(hours=1)
+
+    # Bug 1 fix: Check for existing appointments and cancel duplicates
+    try:
+        existing = await get_contact_appointments(contact_id, cal_id)
+        target_date = start_dt.date()
+        for appt in existing:
+            appt_status = (appt.get("appointmentStatus") or appt.get("status") or "").lower()
+            if appt_status in ("cancelled", "deleted"):
+                continue
+            appt_start = appt.get("startTime") or appt.get("start") or ""
+            if appt_start:
+                try:
+                    existing_dt = dtparser.parse(appt_start)
+                    # Cancel any existing appointment for this contact (reschedule)
+                    appt_id = appt.get("id", "")
+                    if appt_id:
+                        logger.info(
+                            "Cancelling existing appointment %s (was %s) for contact %s — rescheduling to %s",
+                            appt_id, appt_start, contact_id, start_time,
+                        )
+                        await cancel_appointment(appt_id)
+                except (ValueError, TypeError):
+                    pass
+    except Exception as e:
+        logger.warning("Could not check existing appointments for %s: %s", contact_id, e)
+        # Continue with creation — better to have a potential duplicate than to fail
+
+    payload = {
+        "calendarId": cal_id,
+        "locationId": settings.ghl_location_id,
+        "contactId": contact_id,
+        "startTime": start_dt.isoformat(),
+        "endTime": end_dt.isoformat(),
+        "title": title,
+        "appointmentStatus": "confirmed",
+    }
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.post(
+            f"{GHL_BASE}/calendars/events/appointments",
+            headers=_headers(),
+            json=payload,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        logger.info("GHL upsert_appointment → %s", data.get("id", "unknown"))
+        return data
+
+
+async def get_contact_by_id(contact_id: str) -> Optional[Dict[str, Any]]:
+    """Look up a GHL contact by ID."""
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.get(
+            f"{GHL_BASE}/contacts/{contact_id}",
+            headers=_headers(),
+        )
+        if resp.status_code == 404:
+            return None
+        resp.raise_for_status()
+        return resp.json().get("contact", resp.json())
+
+
+async def sync_phone_if_changed(contact_id: str, notion_phone: str) -> Optional[str]:
+    """Compare Notion best phone against GHL primary phone. Update only if different.
+
+    Returns:
+        "updated" if GHL phone was changed.
+        "match" if phones already match.
+        "skipped" if notion_phone is empty or contact not found.
+        "error" on failure.
+    """
+    if not notion_phone or not contact_id:
+        return "skipped"
+
+    try:
+        contact = await get_contact_by_id(contact_id)
+        if not contact:
+            return "skipped"
+
+        # Bug 3 fix: Normalize BOTH phones to E.164 before comparing
+        ghl_phone_e164 = normalize_phone(contact.get("phone") or "")
+        notion_phone_e164 = normalize_phone(notion_phone)
+
+        if not notion_phone_e164:
+            return "skipped"
+
+        if ghl_phone_e164 == notion_phone_e164:
+            return "match"
+
+        # Phones differ in E.164 form — update GHL primary phone
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.put(
+                f"{GHL_BASE}/contacts/{contact_id}",
+                headers=_headers(),
+                json={"phone": notion_phone_e164},
+            )
+            resp.raise_for_status()
+            logger.info(
+                "GHL phone updated for %s: %s → %s",
+                contact_id, contact.get("phone"), notion_phone_e164,
+            )
+            return "updated"
+
+    except Exception as exc:
+        logger.warning("sync_phone_if_changed failed for %s: %s", contact_id, exc)
+        return "error"
