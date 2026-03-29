@@ -8,7 +8,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision = "006_add_conference_sessions"
-down_revision = "005_insert_licenses"
+down_revision = "006_seed_seb_final"
 branch_labels = None
 depends_on = None
 
