@@ -28,7 +28,8 @@ class LeadXref(Base):
 
     id: int = Column(Integer, primary_key=True, autoincrement=True)
     ghl_contact_id: str = Column(String(64), unique=True, nullable=False, index=True)
-    notion_page_id: str = Column(String(64), unique=True, nullable=False, index=True)
+    close_lead_id: str = Column(String(64), nullable=True, index=True)
+    notion_page_id: str = Column(String(64), unique=True, nullable=True, index=True)
     phone: str = Column(String(20), nullable=False, index=True)
     first_name: str = Column(String(128), nullable=True)
     last_name: str = Column(String(128), nullable=True)

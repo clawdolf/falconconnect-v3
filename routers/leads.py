@@ -12,7 +12,11 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, field_validator
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from db.database import get_session
+from db.models import LeadXref
 from middleware.auth import require_auth
 from services import close, ghl, notion
 from services.ghl import normalize_phone, split_phone_field
@@ -106,6 +110,7 @@ class BulkImportResponse(BaseModel):
 async def bulk_import_leads(
     req: BulkImportRequest,
     user=Depends(require_auth),
+    session: AsyncSession = Depends(get_session),
 ) -> BulkImportResponse:
     """Bulk import leads — writes directly to Close.com (primary CRM).
 
@@ -171,11 +176,13 @@ async def bulk_import_leads(
                     )
 
             # ── STEP 3: GHL upsert — non-fatal, surfaces in error summary ──
+            ghl_contact_id = ""
             try:
                 ghl_lead = item.model_dump()
-                ghl_lead["tags"] = ["rvm-pending"]
-                await ghl.upsert_contact(ghl_lead)
-                logger.info("Bulk import — GHL upsert OK: %s", lead_name)
+                ghl_lead["tags"] = ["r0-pending"]
+                ghl_contact = await ghl.upsert_contact(ghl_lead)
+                ghl_contact_id = ghl_contact.get("id", "")
+                logger.info("Bulk import — GHL upsert OK: %s (GHL:%s)", lead_name, ghl_contact_id)
             except Exception as ghl_exc:
                 ghl_detail = str(ghl_exc)
                 errors.append(
@@ -187,10 +194,36 @@ async def bulk_import_leads(
                 )
                 logger.warning("Bulk import — GHL upsert failed for %s (non-fatal): %s", lead_name, ghl_exc)
 
+            # ── STEP 4: Persist GHL↔Close cross-reference ──
+            if ghl_contact_id:
+                try:
+                    result = await session.execute(
+                        select(LeadXref).where(LeadXref.ghl_contact_id == ghl_contact_id)
+                    )
+                    xref = result.scalar_one_or_none()
+                    if xref:
+                        xref.close_lead_id = close_lead_id
+                        xref.phone = normalize_phone(item.phone)
+                    else:
+                        session.add(LeadXref(
+                            ghl_contact_id=ghl_contact_id,
+                            close_lead_id=close_lead_id,
+                            phone=normalize_phone(item.phone),
+                            first_name=item.first_name,
+                            last_name=item.last_name,
+                            notion_page_id=None,
+                        ))
+                    await session.flush()
+                except Exception as xref_exc:
+                    logger.warning(
+                        "LeadXref upsert failed for %s (non-fatal): %s",
+                        lead_name, xref_exc,
+                    )
+
             created += 1
             logger.info(
-                "Bulk import — created: %s (Close:%s)",
-                lead_name, close_lead_id,
+                "Bulk import — created: %s (Close:%s, GHL:%s)",
+                lead_name, close_lead_id, ghl_contact_id or "FAILED",
             )
 
             # Rate limiting delay between Close API calls (300ms)

@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     ghl_location_id: str = ""
     ghl_webhook_secret: str = ""
     ghl_calendar_id: str = "Igep2NHQN6syeVSs5zz1"
+    ghl_rvm_workflow_id: str = ""
 
     # --- Notion ---
     notion_token: str = ""
