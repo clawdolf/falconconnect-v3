@@ -292,18 +292,28 @@ async def _process_appointment(
             lead_id,
         )
 
-    # Resolve contact_id — try activity data first, then look up from lead
+    # Resolve contact_id — try activity data first, then look up from lead.
+    # Always fetch lead data so we can extract the lead's state for TCPA compliance.
     contact_id = activity_data.get("contact_id")
-    if not contact_id and lead_id:
-        lead_data = await _get_lead_details(lead_id)
-        if lead_data:
-            contacts = lead_data.get("contacts", [])
-            if contacts:
-                contact_id = contacts[0].get("id")
+    lead_data = await _get_lead_details(lead_id) if lead_id else None
+    if not contact_id and lead_data:
+        contacts = lead_data.get("contacts", [])
+        if contacts:
+            contact_id = contacts[0].get("id")
 
     if not contact_id:
         logger.error("No contact_id found for lead %s", lead_id)
         return {"status": "error", "reason": "no contact_id"}
+
+    # Extract lead's US state for TCPA quiet hours enforcement on SMS reminders.
+    # Close stores addresses on the lead object; use the first address with a state.
+    lead_state: Optional[str] = None
+    if lead_data:
+        for addr in lead_data.get("addresses", []):
+            st = addr.get("state", "")
+            if st:
+                lead_state = st.strip().upper()[:2]
+                break
 
     # Fetch contact details
     contact = await _get_contact_details(contact_id)
@@ -360,6 +370,7 @@ async def _process_appointment(
             first_name=first_name,
             appointment_dt=appointment_dt,
             tz_choice=tz_choice,
+            lead_state=lead_state,
         ) or sms_results  # fallback if schedule_appointment_sms returns None
 
     # --- Step 2: Set up dummy email + GCal event ---
