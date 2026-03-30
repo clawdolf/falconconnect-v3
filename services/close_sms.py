@@ -9,8 +9,9 @@ Handles:
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 import httpx
 import pytz
@@ -44,6 +45,91 @@ TZ_LABEL_MAP = {
 }
 DEFAULT_TZ = "America/Phoenix"
 DEFAULT_TZ_LABEL = "AZ"
+
+# ---------------------------------------------------------------------------
+# TCPA Quiet Hours — proactive SMS reminders only (confirmations exempt)
+# Federal TCPA: no automated messages before 8am or after 9pm *recipient* local time.
+# Violations: $500-$1,500 per message.
+# ---------------------------------------------------------------------------
+
+TCPA_QUIET_START = time(21, 0)  # 9:00 PM — no messages after this
+TCPA_QUIET_END = time(8, 0)     # 8:00 AM — no messages before this
+
+# Map lead's US state abbreviation → IANA timezone for quiet hours calculation.
+# Covers all states in Seb's current market footprint.
+STATE_TIMEZONES: dict[str, str] = {
+    "AZ": "America/Phoenix",
+    "FL": "America/New_York",
+    "ID": "America/Boise",
+    "KS": "America/Chicago",
+    "ME": "America/New_York",
+    "MT": "America/Denver",
+    "NC": "America/New_York",
+    "OR": "America/Los_Angeles",
+    "PA": "America/New_York",
+    "TX": "America/Chicago",
+}
+
+
+def _enforce_tcpa_quiet_hours(
+    send_at_utc: datetime,
+    lead_state: Optional[str],
+    reminder_type: str,
+) -> datetime:
+    """Shift a scheduled send time to comply with TCPA quiet hours (8am-9pm).
+
+    If the computed send time falls outside 8am-9pm in the lead's local
+    timezone, shifts it to the nearest compliant window:
+      - Before 8am → shift to 8:00am same day
+      - After 9pm → shift to 8:00am next day
+
+    Args:
+        send_at_utc: The originally computed send time (timezone-aware).
+        lead_state: Two-letter US state abbreviation (e.g. "AZ", "TX").
+        reminder_type: "1hr" or "24hr" — for logging only.
+
+    Returns: Adjusted send time (timezone-aware, may be unchanged).
+    """
+    if not lead_state:
+        # No state info — default to Arizona (Seb's home market)
+        lead_tz_name = "America/Phoenix"
+    else:
+        lead_tz_name = STATE_TIMEZONES.get(
+            lead_state.strip().upper(), "America/Phoenix"
+        )
+
+    lead_tz = ZoneInfo(lead_tz_name)
+    local_send = send_at_utc.astimezone(lead_tz)
+    local_time = local_send.time()
+
+    if TCPA_QUIET_END <= local_time < TCPA_QUIET_START:
+        # Within allowed window — no adjustment needed
+        return send_at_utc
+
+    # Outside quiet hours — shift to 8:00am
+    if local_time < TCPA_QUIET_END:
+        # Before 8am same day → shift to 8:00am same day
+        adjusted_local = local_send.replace(
+            hour=8, minute=0, second=0, microsecond=0
+        )
+    else:
+        # After 9pm → shift to 8:00am next day
+        next_day = local_send.date() + timedelta(days=1)
+        adjusted_local = datetime.combine(
+            next_day, TCPA_QUIET_END, tzinfo=lead_tz
+        )
+
+    logger.info(
+        "TCPA quiet hours: %s reminder shifted %s → %s (lead state=%s, tz=%s)",
+        reminder_type,
+        local_send.strftime("%I:%M %p %Z"),
+        adjusted_local.strftime("%I:%M %p %Z"),
+        lead_state or "unknown",
+        lead_tz_name,
+    )
+
+    return adjusted_local
+
 
 # Default SMS templates — used if DB has no entries yet
 DEFAULT_TEMPLATES: dict[str, str] = {
@@ -283,6 +369,7 @@ async def schedule_appointment_sms(
     first_name: str,
     appointment_dt: datetime,
     tz_choice: Optional[str] = None,
+    lead_state: Optional[str] = None,
 ) -> dict[str, Optional[str]]:
     """Schedule all three SMS messages for an appointment.
 
@@ -331,9 +418,13 @@ async def schedule_appointment_sms(
         status="inbox",
     )
 
-    # 2. 24hr reminder — scheduled
+    # 2. 24hr reminder — scheduled (TCPA quiet hours enforced)
     reminder_24hr_dt = appointment_dt - timedelta(hours=24)
     if reminder_24hr_dt > datetime.now(pytz.utc):
+        # Enforce TCPA: if 24hr reminder lands outside 8am-9pm lead local → shift
+        reminder_24hr_dt = _enforce_tcpa_quiet_hours(
+            reminder_24hr_dt, lead_state, "24hr"
+        )
         reminder_24hr_text = await _sms_24hr_reminder(first_name, time_str, tz_label, phone)
         results["reminder_24hr"] = await send_sms(
             lead_id=lead_id,
@@ -350,9 +441,13 @@ async def schedule_appointment_sms(
             lead_id,
         )
 
-    # 3. 1hr reminder — scheduled
+    # 3. 1hr reminder — scheduled (TCPA quiet hours enforced)
     reminder_1hr_dt = appointment_dt - timedelta(hours=1)
     if reminder_1hr_dt > datetime.now(pytz.utc):
+        # Enforce TCPA: if 1hr reminder lands outside 8am-9pm lead local → shift
+        reminder_1hr_dt = _enforce_tcpa_quiet_hours(
+            reminder_1hr_dt, lead_state, "1hr"
+        )
         reminder_1hr_text = await _sms_1hr_reminder(first_name, time_str, tz_label, phone)
         results["reminder_1hr"] = await send_sms(
             lead_id=lead_id,
