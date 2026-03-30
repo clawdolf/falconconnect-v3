@@ -24,6 +24,7 @@ import logging
 import traceback
 from datetime import datetime, timedelta
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 from config import get_settings
 
@@ -32,6 +33,9 @@ logger = logging.getLogger("falconconnect.gcal")
 # Retry config for transient failures
 MAX_RETRIES = 3
 RETRY_BASE_DELAY = 1.0  # seconds, exponential backoff
+
+# Default timezone for all calendar events — Seb operates in Arizona (no DST)
+DEFAULT_GCAL_TIMEZONE = "America/Phoenix"
 
 
 class GCalError(Exception):
@@ -164,11 +168,11 @@ async def create_appointment_event(
         "description": description,
         "start": {
             "dateTime": start_dt.isoformat(),
-            "timeZone": "UTC",
+            "timeZone": DEFAULT_GCAL_TIMEZONE,
         },
         "end": {
             "dateTime": end_dt.isoformat(),
-            "timeZone": "UTC",
+            "timeZone": DEFAULT_GCAL_TIMEZONE,
         },
         "reminders": {
             "useDefault": False,
@@ -237,11 +241,11 @@ async def update_appointment_event(
         end_dt = start_dt + timedelta(minutes=duration_minutes)
         event_body["start"] = {
             "dateTime": start_dt.isoformat(),
-            "timeZone": "UTC",
+            "timeZone": DEFAULT_GCAL_TIMEZONE,
         }
         event_body["end"] = {
             "dateTime": end_dt.isoformat(),
-            "timeZone": "UTC",
+            "timeZone": DEFAULT_GCAL_TIMEZONE,
         }
 
     if not event_body:

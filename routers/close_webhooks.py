@@ -31,6 +31,7 @@ import logging
 import traceback
 from datetime import datetime
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 import httpx
 import pytz
@@ -255,13 +256,17 @@ async def _process_appointment(
         logger.warning("No appointment_datetime in activity for lead %s", lead_id)
         return {"status": "skipped", "reason": "no appointment_datetime"}
 
-    # Parse the datetime
+    # Parse the datetime — if no timezone info, treat as America/Phoenix (MST)
+    # Close sends local times without UTC offset; forcing UTC was placing events
+    # at the wrong hour in Seb's calendar.
     try:
         appointment_dt = datetime.fromisoformat(
             appointment_dt_str.replace("Z", "+00:00")
         )
         if appointment_dt.tzinfo is None:
-            appointment_dt = pytz.utc.localize(appointment_dt)
+            appointment_dt = appointment_dt.replace(
+                tzinfo=ZoneInfo("America/Phoenix")
+            )
     except (ValueError, AttributeError) as exc:
         logger.error(
             "Invalid appointment datetime '%s': %s", appointment_dt_str, exc
