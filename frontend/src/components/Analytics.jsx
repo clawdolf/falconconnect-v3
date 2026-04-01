@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
-import { useAuth } from '@clerk/clerk-react'
+import { useAuthSafe as useAuth } from '../hooks/useClerkSafe'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 
 const CANONICAL_FIELDS = [

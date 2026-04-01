@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useUser } from '@clerk/clerk-react'
+import { useUserSafe as useUser } from '../hooks/useClerkSafe'
 
 const THEME_KEY = 'fc_theme'
 

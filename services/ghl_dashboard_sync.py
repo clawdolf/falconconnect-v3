@@ -1,5 +1,7 @@
 """Compliance checking and sync logic for GHL Dashboard."""
 
+import asyncio
+
 from datetime import datetime, timedelta, timezone
 from typing import Any
 

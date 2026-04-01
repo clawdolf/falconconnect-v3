@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useAuth } from '@clerk/clerk-react'
+import { useAuthSafe as useAuth } from '../hooks/useClerkSafe'
 
 function DryRunReport() {
   const [results, setResults] = useState(null)

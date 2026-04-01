@@ -28,12 +28,11 @@ async def get_summary(client: GHLDashboardClient = Depends(get_client)):
     - last_sync: timestamp of last sync
     """
     try:
-        contacts = await client.get_contacts(limit=1, page=1)
+        contact_count = await client.get_contacts_count()
         pipelines = await client.get_pipelines()
 
-        # For now, return placeholder compliance (would be cached from DB in production)
         return {
-            "contact_count": len(contacts),
+            "contact_count": contact_count,
             "pipeline_count": len(pipelines),
             "compliance_score": 0,  # Placeholder
             "last_sync": datetime.now(timezone.utc).isoformat(),
@@ -52,27 +51,28 @@ async def get_summary(client: GHLDashboardClient = Depends(get_client)):
 @router.get("/contacts")
 async def get_contacts(
     limit: int = Query(50, ge=1, le=100),
-    page: int = Query(1, ge=1),
     client: GHLDashboardClient = Depends(get_client),
 ):
-    """GET /api/ghl-dashboard/contacts?limit=50&page=1
+    """GET /api/ghl-dashboard/contacts?limit=50
 
-    Returns paginated contact list.
+    Returns contact list (cursor-based, GHL v2).
     """
     try:
-        contacts = await client.get_contacts(limit=limit, page=page)
+        result = await client.get_contacts(limit=limit)
+        contacts = result.get("contacts", [])
+        meta = result.get("meta", {})
         return {
-            "page": page,
             "limit": limit,
             "count": len(contacts),
+            "total": meta.get("total", len(contacts)),
             "contacts": contacts,
         }
     except Exception as exc:
         logger.error(f"get_contacts failed: {exc}")
         return {
-            "page": page,
             "limit": limit,
             "count": 0,
+            "total": 0,
             "contacts": [],
             "error": str(exc),
         }

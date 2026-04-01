@@ -1,10 +1,14 @@
-"""Async GHL API v2 client for read-only dashboard intel."""
+"""Async GHL API v2 client for read-only dashboard intel.
+
+Uses httpx (already in requirements.txt) instead of aiohttp.
+GHL v2 uses cursor-based pagination (startAfter/startAfterId), not offset.
+"""
 
 import asyncio
 import logging
 from typing import Any
 
-import aiohttp
+import httpx
 
 logger = logging.getLogger("ghl_dashboard_client")
 
@@ -17,17 +21,10 @@ class GHLDashboardClient:
     RATE_LIMIT_DELAY = 0.1  # 100ms between requests = max 10 req/s
 
     def __init__(self, private_token: str, location_id: str):
-        """Initialize with GHL credentials.
-
-        Args:
-            private_token: GHL Private Integration Token (v2 API)
-            location_id: GHL Location ID
-        """
         self.private_token = private_token
         self.location_id = location_id
 
     def _headers(self) -> dict:
-        """Build standard request headers."""
         return {
             "Authorization": f"Bearer {self.private_token}",
             "Version": self.API_VERSION,
@@ -35,91 +32,61 @@ class GHLDashboardClient:
         }
 
     async def _get(self, endpoint: str, params: dict | None = None) -> dict | list:
-        """Make authenticated GET request with rate limiting.
-
-        Returns raw dict/list on success, [] on any error.
-        """
+        """Make authenticated GET request with rate limiting."""
         url = f"{self.BASE_URL}{endpoint}"
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, headers=self._headers(), params=params, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                    if resp.status == 200:
-                        return await resp.json()
-                    else:
-                        logger.warning(f"GHL API {endpoint} returned {resp.status}")
-                        return [] if isinstance([], list) else {}
+            async with httpx.AsyncClient(timeout=15) as client:
+                resp = await client.get(url, headers=self._headers(), params=params)
+                if resp.status_code == 200:
+                    return resp.json()
+                else:
+                    body = resp.text[:200]
+                    logger.warning("GHL API %s returned %s: %s", endpoint, resp.status_code, body)
+                    return {}
         except Exception as exc:
-            logger.error(f"GHL API {endpoint} failed: {exc}")
-            return [] if endpoint.endswith("s") else {}
+            logger.error("GHL API %s failed: %s", endpoint, exc)
+            return {}
         finally:
             await asyncio.sleep(self.RATE_LIMIT_DELAY)
 
-    async def get_contacts(self, limit: int = 100, page: int = 1) -> list[dict]:
-        """Fetch contacts for location.
-
-        Args:
-            limit: Results per page (max 100)
-            page: 1-indexed page number
-
-        Returns:
-            List of contact dicts, or [] on error
-        """
-        endpoint = f"/contacts/"
-        params = {
+    async def get_contacts(self, limit: int = 100, start_after: int | None = None, start_after_id: str | None = None) -> dict:
+        """Fetch contacts for location. Returns full response dict with contacts + meta."""
+        params: dict[str, Any] = {
             "locationId": self.location_id,
             "limit": min(limit, 100),
-            "offset": (page - 1) * limit,
         }
-        result = await self._get(endpoint, params)
-        return result.get("contacts", []) if isinstance(result, dict) else []
+        if start_after is not None:
+            params["startAfter"] = start_after
+        if start_after_id is not None:
+            params["startAfterId"] = start_after_id
+        result = await self._get("/contacts/", params)
+        return result if isinstance(result, dict) else {"contacts": [], "meta": {}}
+
+    async def get_contacts_count(self) -> int:
+        """Get total contact count without fetching all data."""
+        result = await self.get_contacts(limit=1)
+        return result.get("meta", {}).get("total", len(result.get("contacts", [])))
 
     async def get_pipelines(self) -> list[dict]:
-        """Fetch all pipelines for location.
-
-        Returns:
-            List of pipeline dicts, or [] on error
-        """
-        endpoint = f"/pipelines/"
-        params = {"locationId": self.location_id}
-        result = await self._get(endpoint, params)
+        """Fetch all pipelines for location."""
+        result = await self._get("/pipelines/", {"locationId": self.location_id})
         return result.get("pipelines", []) if isinstance(result, dict) else []
 
-    async def get_opportunities(self, pipeline_id: str, limit: int = 100, page: int = 1) -> list[dict]:
-        """Fetch opportunities for a pipeline.
-
-        Args:
-            pipeline_id: Pipeline ID from get_pipelines
-            limit: Results per page (max 100)
-            page: 1-indexed page number
-
-        Returns:
-            List of opportunity dicts, or [] on error
-        """
-        endpoint = f"/opportunities/"
+    async def get_opportunities(self, pipeline_id: str, limit: int = 100) -> list[dict]:
+        """Fetch opportunities for a pipeline."""
         params = {
             "locationId": self.location_id,
             "pipelineId": pipeline_id,
             "limit": min(limit, 100),
-            "offset": (page - 1) * limit,
         }
-        result = await self._get(endpoint, params)
+        result = await self._get("/opportunities/search", params)
         return result.get("opportunities", []) if isinstance(result, dict) else []
 
-    async def get_conversations(self, limit: int = 100, page: int = 1) -> list[dict]:
-        """Fetch recent conversations for location.
-
-        Args:
-            limit: Results per page (max 100)
-            page: 1-indexed page number
-
-        Returns:
-            List of conversation dicts, or [] on error
-        """
-        endpoint = f"/conversations/"
+    async def get_conversations(self, limit: int = 100) -> list[dict]:
+        """Fetch recent conversations for location."""
         params = {
             "locationId": self.location_id,
             "limit": min(limit, 100),
-            "offset": (page - 1) * limit,
         }
-        result = await self._get(endpoint, params)
+        result = await self._get("/conversations/search", params)
         return result.get("conversations", []) if isinstance(result, dict) else []
