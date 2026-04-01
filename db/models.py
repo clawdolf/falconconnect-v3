@@ -3,6 +3,7 @@
 from datetime import datetime, date
 
 from sqlalchemy import (
+    ARRAY,
     Boolean,
     Column,
     DateTime,
@@ -10,10 +11,12 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     Integer,
+    Numeric,
     String,
     Text,
     func,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, relationship
 
 
@@ -338,3 +341,110 @@ class ResearchAd(Base):
     rejected_at: datetime = Column(DateTime(timezone=True), nullable=True)
     created_at: datetime = Column(DateTime(timezone=True), server_default=func.now())
     updated_at: datetime = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  GHL Dashboard tables — read-only lead intelligence cache
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+class GHLSyncStatus(Base):
+    """Tracks sync metadata for each GHL data type."""
+
+    __tablename__ = "ghl_sync_status"
+
+    id: int = Column(Integer, primary_key=True, autoincrement=True)
+    sync_type: str = Column(String(50), nullable=False)
+    last_sync_at = Column(DateTime(timezone=True), nullable=True)
+    records_synced: int = Column(Integer, default=0)
+    status: str = Column(String(20), default="pending")
+    error_message: str = Column(Text, nullable=True)
+    created_at: datetime = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class GHLContact(Base):
+    """Cached GHL contacts."""
+
+    __tablename__ = "ghl_contacts"
+
+    id: str = Column(String(100), primary_key=True)
+    first_name: str = Column(String(255), nullable=True)
+    last_name: str = Column(String(255), nullable=True)
+    email: str = Column(String(255), nullable=True)
+    phone: str = Column(String(50), nullable=True)
+    tags = Column(ARRAY(Text), nullable=True)
+    dnd: bool = Column(Boolean, default=False)
+    dnd_sms: bool = Column(Boolean, default=False)
+    dnd_email: bool = Column(Boolean, default=False)
+    dnd_calls: bool = Column(Boolean, default=False)
+    source: str = Column(String(255), nullable=True)
+    assigned_to: str = Column(String(100), nullable=True)
+    date_added = Column(DateTime(timezone=True), nullable=True)
+    date_updated = Column(DateTime(timezone=True), nullable=True)
+    custom_fields = Column(JSONB, default={})
+    raw_data = Column(JSONB, nullable=True)
+    synced_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class GHLPipeline(Base):
+    """Cached GHL pipeline structure."""
+
+    __tablename__ = "ghl_pipelines"
+
+    id: str = Column(String(100), primary_key=True)
+    name: str = Column(String(255), nullable=True)
+    stages = Column(JSONB, nullable=True)
+    synced_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class GHLOpportunity(Base):
+    """Cached GHL opportunities."""
+
+    __tablename__ = "ghl_opportunities"
+
+    id: str = Column(String(100), primary_key=True)
+    name: str = Column(String(255), nullable=True)
+    status: str = Column(String(50), nullable=True)
+    pipeline_id: str = Column(String(100), nullable=True)
+    stage_id: str = Column(String(100), nullable=True)
+    stage_name: str = Column(String(255), nullable=True)
+    monetary_value = Column(Numeric(12, 2), nullable=True)
+    contact_id: str = Column(String(100), nullable=True)
+    contact_name: str = Column(String(255), nullable=True)
+    contact_email: str = Column(String(255), nullable=True)
+    contact_phone: str = Column(String(50), nullable=True)
+    date_added = Column(DateTime(timezone=True), nullable=True)
+    last_status_change = Column(DateTime(timezone=True), nullable=True)
+    raw_data = Column(JSONB, nullable=True)
+    synced_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class GHLWorkflow(Base):
+    """Cached GHL workflows."""
+
+    __tablename__ = "ghl_workflows"
+
+    id: str = Column(String(100), primary_key=True)
+    name: str = Column(String(255), nullable=True)
+    status: str = Column(String(50), nullable=True)
+    synced_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class GHLComplianceFlag(Base):
+    """Computed compliance flags from GHL data."""
+
+    __tablename__ = "ghl_compliance_flags"
+
+    id: int = Column(Integer, primary_key=True, autoincrement=True)
+    contact_id: str = Column(String(100), nullable=False)
+    contact_name: str = Column(String(255), nullable=True)
+    contact_phone: str = Column(String(50), nullable=True)
+    contact_email: str = Column(String(255), nullable=True)
+    flag_type: str = Column(String(50), nullable=False)
+    flag_detail: str = Column(Text, nullable=True)
+    severity: str = Column(String(20), default="warning")
+    pipeline_name: str = Column(String(255), nullable=True)
+    stage_name: str = Column(String(255), nullable=True)
+    tags = Column(ARRAY(Text), nullable=True)
+    created_at: datetime = Column(DateTime(timezone=True), server_default=func.now())
+    resolved: bool = Column(Boolean, default=False)

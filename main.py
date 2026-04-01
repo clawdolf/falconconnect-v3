@@ -14,6 +14,7 @@ from routers import leads, webhooks, calendar, analytics, admin, sync, licenses,
 from routers import ghl_cadence, cadence_sms
 from routers.sheets import router as sheets_router
 from routers.sms_templates import router as sms_templates_router
+from routers import ghl_dashboard
 from services.notion_ghl_sync import sync_loop
 
 logging.basicConfig(
@@ -323,9 +324,26 @@ async def lifespan(app: FastAPI):
     # logger.info("Notion→GHL background sync task started")
     sync_task = None  # placeholder for shutdown logic
 
+    # ── APScheduler: GHL dashboard sync every 4 hours ──
+    scheduler = None
+    try:
+        from apscheduler.schedulers.asyncio import AsyncIOScheduler
+        from services.ghl_dashboard_sync import full_sync as ghl_full_sync
+
+        scheduler = AsyncIOScheduler()
+        scheduler.add_job(ghl_full_sync, "interval", hours=4, id="ghl_dashboard_sync", replace_existing=True)
+        scheduler.start()
+        logger.info("APScheduler started — GHL dashboard sync every 4 hours")
+    except ImportError:
+        logger.warning("apscheduler not installed — GHL dashboard auto-sync disabled (pip install apscheduler)")
+    except Exception as exc:
+        logger.warning("APScheduler startup failed (non-fatal): %s", exc)
+
     yield
 
     # Shutdown
+    if scheduler:
+        scheduler.shutdown(wait=False)
     if sync_task:
         sync_task.cancel()
         try:
@@ -465,6 +483,7 @@ app.include_router(conference.router, prefix="/api", tags=["Conference Bridge"])
 app.include_router(ghl_cadence.router, prefix="/api/ghl", tags=["GHL Cadence"])
 app.include_router(cadence_sms.router, prefix="/api/close", tags=["Cadence SMS"])
 app.include_router(close_lead_status.router, prefix="/api/close", tags=["Close Lead Status Kill-Switch"])
+app.include_router(ghl_dashboard.router, tags=["GHL Dashboard"])
 
 @app.get("/api/health/gcal")
 async def health_gcal():
@@ -502,10 +521,27 @@ async def health_gcal():
         )
 
 
-# Serve React frontend (built files) — must be LAST so API routes take priority
+# Serve React frontend — must be LAST so API routes take priority
 frontend_dist = os.path.join(os.path.dirname(__file__), "frontend", "dist")
 if os.path.isdir(frontend_dist):
-    app.mount("/", StaticFiles(directory=frontend_dist, html=True), name="frontend")
-    logger.info("Serving frontend from %s", frontend_dist)
+    # Static assets (JS, CSS, images) — served by Starlette StaticFiles
+    app.mount("/assets", StaticFiles(directory=os.path.join(frontend_dist, "assets")), name="frontend-assets")
+
+    # SPA catch-all: any non-API, non-asset path returns index.html
+    # StaticFiles(html=True) does NOT do SPA fallback — it only serves
+    # index.html for directory paths, not arbitrary paths like /licenses.
+    from fastapi.responses import FileResponse
+
+    @app.get("/{full_path:path}")
+    async def spa_catchall(full_path: str):
+        """Serve index.html for all unmatched paths (SPA client-side routing)."""
+        # Try to serve the exact file first (favicon.ico, falcon-logo.png, etc.)
+        file_path = os.path.join(frontend_dist, full_path)
+        if full_path and os.path.isfile(file_path):
+            return FileResponse(file_path)
+        # Otherwise serve index.html for SPA routing
+        return FileResponse(os.path.join(frontend_dist, "index.html"))
+
+    logger.info("Serving frontend from %s (SPA catch-all enabled)", frontend_dist)
 else:
     logger.info("No frontend/dist directory found — frontend not served")
