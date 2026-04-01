@@ -384,6 +384,7 @@ async def _process_appointment(
             start_dt=appointment_dt,
             duration_minutes=duration_minutes,
             attendee_email=dummy_email,
+            tz_choice=tz_choice,
         )
     except GCalError as exc:
         logger.error(
