@@ -37,6 +37,15 @@ RETRY_BASE_DELAY = 1.0  # seconds, exponential backoff
 # Default timezone for all calendar events — Seb operates in Arizona (no DST)
 DEFAULT_GCAL_TIMEZONE = "America/Phoenix"
 
+# Timezone abbreviation → IANA name map (mirrors close_sms.TZ_MAP)
+_TZ_MAP = {
+    "ET": "America/New_York",
+    "CT": "America/Chicago",
+    "MT": "America/Denver",
+    "PT": "America/Los_Angeles",
+    "AZ": "America/Phoenix",
+}
+
 
 class GCalError(Exception):
     """Raised when a Google Calendar operation fails after retries."""
@@ -144,6 +153,7 @@ async def create_appointment_event(
     duration_minutes: int = 30,
     attendee_email: Optional[str] = None,
     calendar_id: Optional[str] = None,
+    tz_choice: Optional[str] = None,
 ) -> str:
     """Create a Google Calendar event for an appointment.
 
@@ -154,12 +164,15 @@ async def create_appointment_event(
         duration_minutes: Event duration (default 30 min)
         attendee_email: Optional attendee email for Close linking
         calendar_id: Google Calendar ID (defaults to settings)
+        tz_choice: Lead timezone abbreviation (ET/CT/MT/PT/AZ). Falls back
+                   to America/Phoenix if omitted or unrecognised.
 
     Returns: Google Calendar event ID on success.
     Raises: GCalError on failure (after 3 retries).
     """
     settings = get_settings()
     cal_id = calendar_id or settings.google_calendar_id
+    tz_name = _TZ_MAP.get((tz_choice or "").strip().upper(), DEFAULT_GCAL_TIMEZONE)
 
     end_dt = start_dt + timedelta(minutes=duration_minutes)
 
@@ -168,11 +181,11 @@ async def create_appointment_event(
         "description": description,
         "start": {
             "dateTime": start_dt.isoformat(),
-            "timeZone": DEFAULT_GCAL_TIMEZONE,
+            "timeZone": tz_name,
         },
         "end": {
             "dateTime": end_dt.isoformat(),
-            "timeZone": DEFAULT_GCAL_TIMEZONE,
+            "timeZone": tz_name,
         },
         "reminders": {
             "useDefault": False,
