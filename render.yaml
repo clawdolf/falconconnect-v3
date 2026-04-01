@@ -2,7 +2,7 @@ services:
   - type: web
     name: falconconnect-v3
     runtime: python
-    buildCommand: "pip install -r requirements.txt && cd frontend && npm install && npm run build && cd .."
+    buildCommand: "pip install -r requirements.txt && cd frontend && VITE_CLERK_PUBLISHABLE_KEY=$CLERK_PUBLISHABLE_KEY npm install && VITE_CLERK_PUBLISHABLE_KEY=$CLERK_PUBLISHABLE_KEY npm run build && cd .."
     startCommand: "alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port $PORT"
     healthCheckPath: /health
     envVars:
