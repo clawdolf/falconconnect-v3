@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { useAuth } from '@clerk/clerk-react'
+import { useAuthSafe as useAuth } from '../hooks/useClerkSafe'
 
 const STATE_MAP = {
   'Alabama': 'AL', 'Alaska': 'AK', 'Arizona': 'AZ', 'Arkansas': 'AR', 'California': 'CA',
@@ -137,8 +137,7 @@ function Licenses() {
   const [formData, setFormData] = useState(blankForm)
   const [editData, setEditData] = useState({})
 
-  let getToken = null
-  try { const auth = useAuth(); getToken = auth.getToken } catch {}
+  const { getToken } = useAuth()
 
   const getHeaders = async () => {
     const headers = { 'Content-Type': 'application/json' }

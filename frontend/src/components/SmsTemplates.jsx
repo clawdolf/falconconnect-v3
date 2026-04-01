@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useAuthSafe as useAuth } from '../hooks/useClerkSafe'
 
 const TEMPLATE_LABELS = {
   confirmation: 'Confirmation',
@@ -17,11 +18,21 @@ function charCount(text) {
 }
 
 export default function SmsTemplates() {
+  const { getToken } = useAuth()
   const [templates, setTemplates] = useState([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState({})
   const [saved, setSaved] = useState({})
   const [error, setError] = useState('')
+
+  async function getAuthHeaders() {
+    const headers = { 'Content-Type': 'application/json' }
+    try {
+      const t = await getToken()
+      if (t) headers['Authorization'] = `Bearer ${t}`
+    } catch {}
+    return headers
+  }
 
   useEffect(() => {
     fetchTemplates()
@@ -31,9 +42,8 @@ export default function SmsTemplates() {
     setLoading(true)
     setError('')
     try {
-      const resp = await fetch('/api/sms-templates', {
-        headers: { Authorization: `Bearer ${await window.Clerk?.session?.getToken()}` },
-      })
+      const headers = await getAuthHeaders()
+      const resp = await fetch('/api/sms-templates', { headers })
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
       const data = await resp.json()
       setTemplates(data)
@@ -49,12 +59,10 @@ export default function SmsTemplates() {
     setSaved((s) => ({ ...s, [key]: false }))
     setError('')
     try {
+      const headers = await getAuthHeaders()
       const resp = await fetch(`/api/sms-templates/${key}`, {
         method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${await window.Clerk?.session?.getToken()}`,
-        },
+        headers,
         body: JSON.stringify({ body }),
       })
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`)

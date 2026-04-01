@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useAuth } from '@clerk/clerk-react'
+import { useAuthSafe as useAuth } from '../hooks/useClerkSafe'
 
 function QuickAddLead() {
   const [open, setOpen] = useState(false)

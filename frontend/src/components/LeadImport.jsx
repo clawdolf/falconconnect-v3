@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useMemo } from 'react'
 import { flushSync } from 'react-dom'
-import { useAuth } from '@clerk/clerk-react'
+import { useAuthSafe as useAuth } from '../hooks/useClerkSafe'
 import * as XLSX from 'xlsx'
 import {
   VENDOR_TIERS, NEEDS_LEAD_AGE, VENDOR_AGE_BUCKETS, LEAD_TYPES, LEAD_VENDORS,
@@ -33,8 +33,7 @@ function LeadImport() {
   const [mappingFileIdx, setMappingFileIdx] = useState(0)
   const [adjustAge, setAdjustAge] = useState(false)
 
-  let getToken = null
-  try { const auth = useAuth(); getToken = auth.getToken } catch {}
+  const { getToken } = useAuth()
 
   const getAuthHeaders = async () => {
     const h = { 'Content-Type': 'application/json' }

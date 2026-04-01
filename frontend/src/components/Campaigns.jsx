@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import { useAuth } from '@clerk/clerk-react'
+import { useAuthSafe as useAuth } from '../hooks/useClerkSafe'
 
 const fmtCurr = (v) => v == null || isNaN(v) ? '$0' : '$' + Number(v).toLocaleString('en-US', { maximumFractionDigits: 0 })
 const fmtCpl = (v) => v == null || isNaN(v) ? '$0.00' : '$' + Number(v).toFixed(2)

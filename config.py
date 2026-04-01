@@ -79,9 +79,7 @@ class Settings(BaseSettings):
     plaid_secret: str = ""
     plaid_env: str = "sandbox"
 
-    # --- GHL Dashboard (read-only intel) ---
-    ghl_private_token: str = ""
-    ghl_location_id: str = ""
+    # (GHL Dashboard uses ghl_private_token and ghl_location_id from the GHL section above)
 
 
 @lru_cache(maxsize=1)
