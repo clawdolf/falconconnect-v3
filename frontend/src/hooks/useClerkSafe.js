@@ -5,7 +5,7 @@
  * is not rendered, and bare useAuth() / useUser() hooks throw. These wrappers
  * return sensible no-op defaults so components render without crashing.
  */
-import { useAuth as _useAuth, useUser as _useUser } from '@clerk/clerk-react'
+import { useAuth as _useAuth, useUser as _useUser, useClerk as _useClerk } from '@clerk/clerk-react'
 
 const PUBLISHABLE_KEY = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY
 const DEV_BYPASS = import.meta.env.VITE_DEV_BYPASS === 'true'
@@ -42,4 +42,20 @@ export function useUserSafe() {
     }
   }
   return _useUser()
+}
+
+/**
+ * Safe useClerk — returns { signOut, openUserProfile, ... }
+ * Outside ClerkProvider: signOut is a no-op.
+ */
+export function useClerkSafe() {
+  if (!HAS_CLERK) {
+    return {
+      signOut: async () => {},
+      openUserProfile: () => {},
+      openSignIn: () => {},
+      loaded: true,
+    }
+  }
+  return _useClerk()
 }

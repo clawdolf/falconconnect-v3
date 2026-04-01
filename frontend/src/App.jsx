@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { ClerkProvider, SignedIn, SignedOut, useSignIn, useUser, useClerk, AuthenticateWithRedirectCallback, UserProfile } from '@clerk/clerk-react'
+import { useUserSafe, useClerkSafe } from './hooks/useClerkSafe'
 import Dashboard from './components/Dashboard'
 import LeadImport from './components/LeadImport'
 import Licenses from './components/Licenses'
@@ -325,8 +326,8 @@ function CustomSignIn() {
 
 /* ── Custom User Menu (no Clerk branding) ── */
 function UserMenu() {
-  const { user } = useUser()
-  const { signOut } = useClerk()
+  const { user } = useUserSafe()
+  const { signOut } = useClerkSafe()
   const [open, setOpen] = useState(false)
   const [showProfile, setShowProfile] = useState(false)
   const menuRef = useRef(null)
@@ -670,9 +671,7 @@ function AppLayout() {
           </nav>
         )}
 
-        {!DEV_BYPASS && PUBLISHABLE_KEY && (
-          <SidebarFooter onSettings={() => setCurrentPage('settings')} />
-        )}
+        <SidebarFooter onSettings={() => setCurrentPage('settings')} />
       </aside>
       <main className="main-content">
         <PageContent currentPage={currentPage} onNavigate={setCurrentPage} />

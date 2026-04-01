@@ -1,9 +1,12 @@
 """Compliance checking and sync logic for GHL Dashboard."""
 
 import asyncio
+import logging
 
 from datetime import datetime, timedelta, timezone
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 def check_contact_compliance(contact: dict) -> dict:
@@ -133,3 +136,14 @@ def run_compliance_check(contacts: list[dict]) -> dict:
         "issues": issues_list,
         "results": results,
     }
+
+
+async def full_sync() -> None:
+    """Periodic GHL dashboard sync job (run every 4 hours by APScheduler).
+
+    Stub implementation — no-op for now.
+    TODO: Fetch GHL contacts via client, run compliance check, upsert results to DB.
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info("[GHL Sync] full_sync cron job triggered")
