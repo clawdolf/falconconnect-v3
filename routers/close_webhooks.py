@@ -249,6 +249,24 @@ async def _process_appointment(
     """
     settings = get_settings()
 
+    # --- Idempotency guard: skip if we've already processed this activity ---
+    activity_id = activity_data.get("id")
+    if activity_id:
+        async with _get_session_factory()() as session:
+            existing = await session.execute(
+                select(AppointmentReminder).where(
+                    AppointmentReminder.activity_id == activity_id,
+                    AppointmentReminder.status == "active",
+                )
+            )
+            if existing.scalar_one_or_none():
+                logger.info(
+                    "Duplicate webhook — activity %s already processed for lead %s, skipping",
+                    activity_id,
+                    lead_id,
+                )
+                return {"status": "skipped", "reason": "duplicate_webhook", "activity_id": activity_id}
+
     # Close sends custom fields as flat "custom.cf_XXX" keys at the data level,
     # NOT as a nested "custom" dict. Extract them directly.
     appointment_dt_str = activity_data.get(f"custom.{CF_APPOINTMENT_DATETIME}")
@@ -416,6 +434,7 @@ async def _process_appointment(
         reminder = AppointmentReminder(
             lead_id=lead_id,
             contact_id=contact_id,
+            activity_id=activity_id,
             appointment_datetime=appointment_dt,
             sms_id_confirmation=sms_results.get("confirmation"),
             sms_id_24hr=sms_results.get("reminder_24hr"),

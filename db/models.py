@@ -157,6 +157,7 @@ class AppointmentReminder(Base):
     id: int = Column(Integer, primary_key=True, autoincrement=True)
     lead_id: str = Column(String(128), nullable=False, index=True)
     contact_id: str = Column(String(128), nullable=False)
+    activity_id: str = Column(String(128), nullable=True, unique=True, index=True)  # Close activity ID — idempotency key
     appointment_datetime: datetime = Column(DateTime(timezone=True), nullable=False)
     sms_id_confirmation: str = Column(String(128), nullable=True)
     sms_id_24hr: str = Column(String(128), nullable=True)
