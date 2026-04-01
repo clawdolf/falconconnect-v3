@@ -4,13 +4,13 @@ import Dashboard from './components/Dashboard'
 import LeadImport from './components/LeadImport'
 import Licenses from './components/Licenses'
 import Team from './components/Team'
-import SyncManagement from './components/SyncManagement'
 import Analytics from './components/Analytics'
 import Campaigns from './components/Campaigns'
 import Research from './components/Research'
 import GHLDashboard from './pages/GHLDashboard'
 import SmsTemplates from './components/SmsTemplates'
 import CallManagement from './components/CallManagement'
+import Settings from './pages/Settings'
 
 const PUBLISHABLE_KEY = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY
 const DEV_BYPASS = import.meta.env.VITE_DEV_BYPASS === 'true'
@@ -20,13 +20,13 @@ const NAV_ITEMS = [
   { key: 'leads', label: 'Lead Import' },
   { key: 'licenses', label: 'Licenses' },
   { key: 'team', label: 'Team' },
-  { key: 'sync', label: 'Sync' },
   { key: 'analytics', label: 'Analytics' },
   { key: 'ghl-intel', label: 'GHL Intel' },
   { key: 'campaigns', label: 'Campaigns' },
   { key: 'research', label: 'Research' },
   { key: 'sms-templates', label: 'SMS Templates' },
   { key: 'calls', label: 'Call Management' },
+  { key: 'settings', label: 'Settings' },
 ]
 
 function PageContent({ currentPage, onNavigate }) {
@@ -37,8 +37,6 @@ function PageContent({ currentPage, onNavigate }) {
       return <Licenses />
     case 'team':
       return <Team />
-    case 'sync':
-      return <SyncManagement />
     case 'analytics':
       return <Analytics />
     case 'ghl-intel':
@@ -51,6 +49,8 @@ function PageContent({ currentPage, onNavigate }) {
       return <SmsTemplates />
     case 'calls':
       return <CallManagement />
+    case 'settings':
+      return <Settings />
     default:
       return <Dashboard />
   }
@@ -574,6 +574,45 @@ function UserMenu() {
   )
 }
 
+/* ── Sidebar Footer ── */
+function SidebarFooter({ onSettings }) {
+  return (
+    <div className="sidebar-footer" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem' }}>
+      <UserMenu />
+      <button
+        onClick={onSettings}
+        aria-label="Open settings"
+        title="Settings"
+        style={{
+          background: 'none',
+          border: 'none',
+          cursor: 'pointer',
+          color: 'var(--text-muted)',
+          fontFamily: 'var(--font-mono)',
+          fontSize: '0.7rem',
+          letterSpacing: '0.04em',
+          padding: '0.25rem 0.375rem',
+          borderRadius: 2,
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.3rem',
+          transition: 'color 0.1s, background 0.1s',
+          flexShrink: 0,
+          touchAction: 'manipulation',
+        }}
+        onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text)'; e.currentTarget.style.background = 'var(--surface-hover)' }}
+        onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-muted)'; e.currentTarget.style.background = 'none' }}
+      >
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="3" />
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+        </svg>
+        Settings
+      </button>
+    </div>
+  )
+}
+
 /* ── App Layout ── */
 function AppLayout() {
   const [currentPage, setCurrentPage] = useState('dashboard')
@@ -632,9 +671,7 @@ function AppLayout() {
         )}
 
         {!DEV_BYPASS && PUBLISHABLE_KEY && (
-          <div className="sidebar-footer">
-            <UserMenu />
-          </div>
+          <SidebarFooter onSettings={() => setCurrentPage('settings')} />
         )}
       </aside>
       <main className="main-content">
