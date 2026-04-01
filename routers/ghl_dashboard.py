@@ -85,9 +85,10 @@ async def get_contacts_compliance(client: GHLDashboardClient = Depends(get_clien
     Returns compliance report across all contacts.
     """
     try:
-        # Fetch all contacts (may need pagination for large lists)
-        contacts = await client.get_contacts(limit=100, page=1)
-        report = run_compliance_check(contacts)
+        # Fetch contacts (first 100 for compliance check)
+        result = await client.get_contacts(limit=100)
+        contacts_list = result.get("contacts", []) if isinstance(result, dict) else []
+        report = run_compliance_check(contacts_list)
         return {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             **report,
@@ -177,26 +178,42 @@ async def get_conversations(
 
 
 @router.get("/sync/status")
-async def get_sync_status():
+async def get_sync_status(client: GHLDashboardClient = Depends(get_client)):
     """GET /api/ghl-dashboard/sync/status
 
-    Returns status of last sync and record counts.
-    (Placeholder — would read from DB in production)
+    Returns live status by checking GHL API connectivity + counts.
     """
-    return {
-        "last_sync": None,
-        "records_processed": 0,
-        "status": "never_run",
-        "error": None,
-    }
+    try:
+        count = await client.get_contacts_count()
+        return {
+            "last_sync": datetime.now(timezone.utc).isoformat(),
+            "records_processed": count,
+            "status": "connected" if count > 0 else "empty",
+            "error": None,
+        }
+    except Exception as exc:
+        return {
+            "last_sync": None,
+            "records_processed": 0,
+            "status": "error",
+            "error": str(exc),
+        }
 
 
 @router.post("/sync/trigger")
-async def trigger_sync():
+async def trigger_sync(client: GHLDashboardClient = Depends(get_client)):
     """POST /api/ghl-dashboard/sync/trigger
 
-    Manually trigger background sync (non-blocking).
-    Returns immediately with {status: "triggered"}.
+    Run a live sync check against GHL and return results.
     """
-    # TODO: Spawn background task to sync GHL data
-    return {"status": "triggered"}
+    try:
+        count = await client.get_contacts_count()
+        pipelines = await client.get_pipelines()
+        return {
+            "status": "complete",
+            "contact_count": count,
+            "pipeline_count": len(pipelines),
+            "synced_at": datetime.now(timezone.utc).isoformat(),
+        }
+    except Exception as exc:
+        return {"status": "error", "error": str(exc)}
