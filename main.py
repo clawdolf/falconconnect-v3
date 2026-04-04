@@ -280,7 +280,20 @@ async def lifespan(app: FastAPI):
 
     # init_db() runs create_all (idempotent — creates missing tables, skips existing)
     # Alembic migrations ran at build time; this is a fast safety net only.
-    await init_db()
+    try:
+        await init_db()
+    except Exception as _init_exc:
+        import traceback
+        _tb = traceback.format_exc()
+        logger.error("STARTUP CRASH in init_db(): %s", _init_exc)
+        try:
+            from services.telegram_alerts import send_telegram_alert as _tg
+            import asyncio as _asyncio
+            _asyncio.create_task(_tg(f"STARTUP CRASH
+{_tb[:800]}"))
+        except Exception:
+            pass
+        raise
 
     # Fix agents.user_id mismatch before seeding/deduping licenses
     await _fix_agent_user_id()
