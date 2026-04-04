@@ -3,7 +3,6 @@
 from datetime import datetime, date
 
 from sqlalchemy import (
-    ARRAY,
     Boolean,
     Column,
     DateTime,
@@ -16,7 +15,7 @@ from sqlalchemy import (
     Text,
     func,
 )
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import DeclarativeBase, relationship
 
 
