@@ -29,6 +29,7 @@ from fastapi import APIRouter, HTTPException, Query, Request, status
 
 from config import get_settings
 from services.telegram_alerts import send_telegram_alert
+from services.sms_routing import resolve_sms_from_number
 
 logger = logging.getLogger("falconconnect.cadence_sms")
 
@@ -267,8 +268,10 @@ async def send_cadence_sms(
     if not sms_text:
         return {"status": "error", "reason": f"unknown template: {template_key}"}
 
-    # Resolve outbound number
-    from_number = _resolve_from_number(info["state"])
+    # Resolve outbound number via smart routing (history → area code → state fallback)
+    from_number = await resolve_sms_from_number(lead_id, info["phone"])
+    if not from_number:
+        from_number = _resolve_from_number(info["state"])
 
     # Send SMS
     sms_id = await _send_close_sms(
