@@ -14,22 +14,25 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # Add close_lead_id column (nullable, indexed)
-    op.add_column(
-        "lead_xref",
-        sa.Column("close_lead_id", sa.String(64), nullable=True),
-    )
-    op.create_index("ix_lead_xref_close_lead_id", "lead_xref", ["close_lead_id"])
+    from sqlalchemy import inspect as sa_inspect
+    bind = op.get_bind()
+    cols = [c["name"] for c in sa_inspect(bind).get_columns("lead_xref")]
+    idxs = [i["name"] for i in sa_inspect(bind).get_indexes("lead_xref")]
 
-    # Make notion_page_id nullable (was NOT NULL in original schema)
-    # SQLite doesn't support ALTER COLUMN, so use batch mode
+    if "close_lead_id" not in cols:
+        op.add_column(
+            "lead_xref",
+            sa.Column("close_lead_id", sa.String(64), nullable=True),
+        )
+    if "ix_lead_xref_close_lead_id" not in idxs:
+        op.create_index("ix_lead_xref_close_lead_id", "lead_xref", ["close_lead_id"])
+
     with op.batch_alter_table("lead_xref") as batch_op:
         batch_op.alter_column(
             "notion_page_id",
             existing_type=sa.String(64),
             nullable=True,
         )
-
 
 def downgrade() -> None:
     op.drop_index("ix_lead_xref_close_lead_id", table_name="lead_xref")

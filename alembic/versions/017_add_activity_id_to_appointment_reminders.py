@@ -14,6 +14,11 @@ depends_on = None
 
 
 def upgrade() -> None:
+    from sqlalchemy import inspect as sa_inspect
+    bind = op.get_bind()
+    cols = [c["name"] for c in sa_inspect(bind).get_columns("appointment_reminders")]
+    if "activity_id" in cols:
+        return  # column already exists
     # Add activity_id column — nullable initially to avoid breaking existing rows
     op.add_column(
         "appointment_reminders",

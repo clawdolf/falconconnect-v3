@@ -14,6 +14,11 @@ depends_on = None
 
 
 def upgrade() -> None:
+    from sqlalchemy import inspect as sa_inspect
+    bind = op.get_bind()
+    existing = sa_inspect(bind).get_table_names()
+    if "ghl_dashboard_sync_log" in existing:
+        return  # tables already exist, skip
     op.create_table(
         "ghl_dashboard_sync_log",
         sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
