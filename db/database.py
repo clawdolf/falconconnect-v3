@@ -16,12 +16,38 @@ _engine = None
 _async_session_factory = None
 
 
+def _coerce_database_url(url: str) -> str:
+    """Normalize DATABASE_URL to the format SQLAlchemy async engine expects.
+
+    Render (and some other hosts) provide a bare 'postgres://' or
+    'postgresql://' connection string.  SQLAlchemy's async engine requires
+    the driver to be specified explicitly; asyncpg is the only async driver
+    in our requirements.
+
+    Transformation rules:
+      postgres://...      -> postgresql+asyncpg://...
+      postgresql://...    -> postgresql+asyncpg://...
+      (anything else)     -> unchanged (e.g. sqlite+aiosqlite://...)
+    """
+    if url.startswith("postgres://"):
+        return "postgresql+asyncpg://" + url[len("postgres://"):]
+    if url.startswith("postgresql://"):
+        return "postgresql+asyncpg://" + url[len("postgresql://"):]
+    return url
+
+
 def _get_engine():
     global _engine
     if _engine is None:
         settings = get_settings()
+        db_url = _coerce_database_url(settings.database_url)
+        if db_url != settings.database_url:
+            logger.info(
+                "DATABASE_URL scheme coerced to postgresql+asyncpg:// "
+                "(original prefix: %s)", settings.database_url.split("://")[0]
+            )
         _engine = create_async_engine(
-            settings.database_url,
+            db_url,
             echo=False,
             pool_pre_ping=True,
         )
