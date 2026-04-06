@@ -235,7 +235,11 @@ def _validate_critical_env() -> None:
         "GOOGLE_REFRESH_TOKEN": bool(settings.google_refresh_token),
         "CLERK_SECRET_KEY": bool(settings.clerk_secret_key),
         "CLERK_PUBLISHABLE_KEY": bool(settings.clerk_publishable_key),
-        "DATABASE_URL": bool(settings.database_url),
+        # Must be postgres — sqlite = Render env var lost, stale secret file activated
+        "DATABASE_URL (postgres)": (
+            bool(settings.database_url)
+            and "sqlite" not in settings.database_url
+        ),
         "GHL_API_KEY": bool(settings.ghl_api_key),
     }
     missing = [k for k, present in critical.items() if not present]
@@ -272,6 +276,18 @@ def _validate_critical_env() -> None:
 async def lifespan(app: FastAPI):
     """Startup / shutdown lifecycle."""
     logger.info("FalconConnect v3 starting up …")
+
+    # Hard guard: crash immediately if DATABASE_URL is missing or pointing to SQLite.
+    # Surfaces before init_db() so the error is unambiguous in Render logs.
+    _raw_db_url = os.environ.get("DATABASE_URL", "")
+    if not _raw_db_url or "sqlite" in _raw_db_url:
+        _msg = (
+            "FATAL STARTUP: DATABASE_URL is missing or set to SQLite. "
+            "The Render env vars panel lost the value. "
+            "Restore DATABASE_URL=postgresql+asyncpg://... in Render immediately."
+        )
+        logger.critical(_msg)
+        raise RuntimeError(_msg)
 
     # Validate critical env vars before anything else
     _validate_critical_env()
