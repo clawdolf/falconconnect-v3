@@ -6,8 +6,8 @@ Flow:
 1. GHL fires webhook when contact tag changes to "r0-complete"
 2. Extracts contact data (name, phone, custom fields) from GHL payload
 3. Checks if lead already exists in Close by phone number
-4. If new: creates lead in Close with cadence_stage=r1-to-call + GHL contact ID
-5. If existing: updates cadence_stage to r1-to-call
+4. If new: creates lead in Close with cadence_stage=2. r1-calling + GHL contact ID
+5. If existing: updates cadence_stage to 2. r1-calling
 6. Logs every action to sync_log table
 7. Returns 200 on success
 
@@ -119,7 +119,7 @@ async def _create_close_lead(
     ghl_contact_id: str,
     email: Optional[str] = None,
 ) -> Optional[str]:
-    """Create a new lead in Close with cadence_stage=r1-to-call.
+    """Create a new lead in Close with cadence_stage=2. r1-calling.
 
     Returns the lead ID on success, None on failure.
     """
@@ -133,7 +133,7 @@ async def _create_close_lead(
         "name": name,
         "status_id": DEFAULT_STATUS_ID,
         "contacts": contacts,
-        f"custom.{CF_CADENCE_STAGE}": "r1-to-call",
+        f"custom.{CF_CADENCE_STAGE}": "2. r1-calling",
         f"custom.{CF_GHL_ID}": ghl_contact_id,
     }
 
@@ -252,7 +252,7 @@ async def ghl_rvm_complete(
 ):
     """Receive GHL webhook when contact tag changes to r0-complete.
 
-    Creates or updates the lead in Close with cadence_stage=r1-to-call.
+    Creates or updates the lead in Close with cadence_stage=2. r1-calling.
 
     Webhook URL: https://falconnect.org/api/ghl/rvm-complete
     Auth: X-GHL-Webhook-Secret header
@@ -302,10 +302,10 @@ async def ghl_rvm_complete(
     if existing_lead:
         lead_id = existing_lead.get("id", "")
         logger.info(
-            "Lead already exists in Close: %s — updating cadence_stage to r1-to-call",
+            "Lead already exists in Close: %s — updating cadence_stage to 2. r1-calling",
             lead_id,
         )
-        updated = await _update_cadence_stage(lead_id, "r1-to-call")
+        updated = await _update_cadence_stage(lead_id, "2. r1-calling")
         await _log_sync(
             session,
             event_type="ghl.rvm_complete",
@@ -319,7 +319,7 @@ async def ghl_rvm_complete(
             "status": "ok",
             "action": "updated",
             "lead_id": lead_id,
-            "cadence_stage": "r1-to-call",
+            "cadence_stage": "2. r1-calling",
         }
 
     # Create new lead in Close
@@ -347,14 +347,14 @@ async def ghl_rvm_complete(
             f"Phone: {phone}\n"
             f"GHL ID: {ghl_contact_id}\n"
             f"Close Lead: {lead_id}\n"
-            f"Stage: r1-to-call",
+            f"Stage: 2. r1-calling",
         )
 
         return {
             "status": "ok",
             "action": "created",
             "lead_id": lead_id,
-            "cadence_stage": "r1-to-call",
+            "cadence_stage": "2. r1-calling",
         }
 
     # Creation failed
