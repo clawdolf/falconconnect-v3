@@ -41,6 +41,17 @@ def _get_engine():
     if _engine is None:
         settings = get_settings()
         db_url = _coerce_database_url(settings.database_url)
+
+        # Hard-fail if sqlite sneaks in — this always means a missing DATABASE_URL
+        # in Render env vars (the secret file has a stale sqlite fallback).
+        # Starting on SQLite crashes immediately on ARRAY/JSONB column types anyway.
+        if "sqlite" in db_url:
+            raise RuntimeError(
+                "FATAL: DATABASE_URL resolved to SQLite. This means DATABASE_URL is missing "
+                "from Render env vars and the stale secret file fallback activated. "
+                "Fix: add DATABASE_URL=postgresql+asyncpg://... to the Render env vars panel."
+            )
+
         if db_url != settings.database_url:
             logger.info(
                 "DATABASE_URL scheme coerced to postgresql+asyncpg:// "
