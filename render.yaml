@@ -3,7 +3,7 @@ services:
     name: falconconnect-v3
     runtime: python
     buildCommand: "pip install -r requirements.txt"
-    startCommand: "alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port $PORT"
+    startCommand: "python startup.py"
     healthCheckPath: /health
     envVars:
       - key: DATABASE_URL
