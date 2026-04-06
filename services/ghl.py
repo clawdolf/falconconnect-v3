@@ -19,9 +19,6 @@ logger = logging.getLogger("falconconnect.ghl")
 GHL_BASE = "https://services.leadconnectorhq.com"
 GHL_API_VERSION = "2021-07-28"
 
-# Cached pipeline data — populated on first use
-_pipeline_cache: Optional[List[Dict[str, Any]]] = None
-
 # ── State → timezone mapping (all 50 US states) ──
 
 STATE_TIMEZONES = {
@@ -130,74 +127,6 @@ def _headers() -> Dict[str, str]:
         "Accept": "application/json",
     }
 
-
-async def _get_pipelines() -> List[Dict[str, Any]]:
-    """Fetch and cache pipeline data from GHL."""
-    global _pipeline_cache
-    if _pipeline_cache is not None:
-        return _pipeline_cache
-
-    settings = get_settings()
-    async with httpx.AsyncClient(timeout=30) as client:
-        resp = await client.get(
-            f"{GHL_BASE}/opportunities/pipelines",
-            headers=_headers(),
-            params={"locationId": settings.ghl_location_id},
-        )
-        resp.raise_for_status()
-        _pipeline_cache = resp.json().get("pipelines", [])
-        logger.info("Cached %d GHL pipelines", len(_pipeline_cache))
-        return _pipeline_cache
-
-
-async def _find_stage(stage_name: str, pipeline_name: Optional[str] = None) -> Dict[str, str]:
-    """Find a pipeline stage by name. Returns {pipelineId, stageId}.
-
-    If pipeline_name is None, searches all pipelines and returns the first match.
-    Defaults to FEX Leads pipeline → "New Lead" stage if nothing matches.
-    """
-    pipelines = await _get_pipelines()
-
-    for pipeline in pipelines:
-        if pipeline_name and pipeline_name.lower() not in pipeline["name"].lower():
-            continue
-        for stage in pipeline.get("stages", []):
-            # Strip emojis for comparison
-            clean_name = stage["name"].split("\u200b")[0].strip()
-            # Match by prefix (handles emoji suffixes)
-            if stage_name.lower() in clean_name.lower():
-                return {
-                    "pipelineId": pipeline["id"],
-                    "stageId": stage["id"],
-                    "pipelineName": pipeline["name"],
-                    "stageName": stage["name"],
-                }
-
-    # Default: MTG Leads → first stage (Mortgage Protection pipeline)
-    for keyword in ("mtg", "mortgage"):
-        for pipeline in pipelines:
-            if keyword in pipeline["name"].lower():
-                if pipeline.get("stages"):
-                    first = pipeline["stages"][0]
-                    return {
-                        "pipelineId": pipeline["id"],
-                        "stageId": first["id"],
-                        "pipelineName": pipeline["name"],
-                        "stageName": first["name"],
-                    }
-
-    # Last resort: first pipeline, first stage
-    if pipelines and pipelines[0].get("stages"):
-        p = pipelines[0]
-        s = p["stages"][0]
-        return {
-            "pipelineId": p["id"],
-            "stageId": s["id"],
-            "pipelineName": p["name"],
-            "stageName": s["name"],
-        }
-
-    raise ValueError("No pipelines/stages found in GHL")
 
 
 async def upsert_contact(
@@ -332,49 +261,6 @@ async def upsert_contact(
 
         return contact
 
-
-async def create_opportunity(
-    contact_id: str,
-    stage_name: str = "New Lead",
-    pipeline_name: Optional[str] = "MTG Leads",
-    name: Optional[str] = None,
-) -> Dict[str, Any]:
-    """Create a pipeline opportunity for a contact.
-
-    Finds the correct pipeline/stage by name, then creates the opportunity.
-    Defaults to MTG Leads pipeline (Mortgage Protection).
-    Returns the opportunity object from GHL.
-    """
-    settings = get_settings()
-
-    stage_info = await _find_stage(stage_name, pipeline_name)
-    logger.info(
-        "Creating opportunity in %s → %s",
-        stage_info["pipelineName"],
-        stage_info["stageName"],
-    )
-
-    payload: Dict[str, Any] = {
-        "locationId": settings.ghl_location_id,
-        "contactId": contact_id,
-        "pipelineId": stage_info["pipelineId"],
-        "pipelineStageId": stage_info["stageId"],
-        "status": "open",
-    }
-    if name:
-        payload["name"] = name
-
-    async with httpx.AsyncClient(timeout=30) as client:
-        resp = await client.post(
-            f"{GHL_BASE}/opportunities/",
-            headers=_headers(),
-            json=payload,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        opp = data.get("opportunity", data)
-        logger.info("GHL create_opportunity → %s", opp.get("id", "unknown"))
-        return opp
 
 
 async def get_contact_appointments(
@@ -528,49 +414,3 @@ async def get_contact_by_id(contact_id: str) -> Optional[Dict[str, Any]]:
             return None
         resp.raise_for_status()
         return resp.json().get("contact", resp.json())
-
-
-async def sync_phone_if_changed(contact_id: str, notion_phone: str) -> Optional[str]:
-    """Compare Notion best phone against GHL primary phone. Update only if different.
-
-    Returns:
-        "updated" if GHL phone was changed.
-        "match" if phones already match.
-        "skipped" if notion_phone is empty or contact not found.
-        "error" on failure.
-    """
-    if not notion_phone or not contact_id:
-        return "skipped"
-
-    try:
-        contact = await get_contact_by_id(contact_id)
-        if not contact:
-            return "skipped"
-
-        # Bug 3 fix: Normalize BOTH phones to E.164 before comparing
-        ghl_phone_e164 = normalize_phone(contact.get("phone") or "")
-        notion_phone_e164 = normalize_phone(notion_phone)
-
-        if not notion_phone_e164:
-            return "skipped"
-
-        if ghl_phone_e164 == notion_phone_e164:
-            return "match"
-
-        # Phones differ in E.164 form — update GHL primary phone
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.put(
-                f"{GHL_BASE}/contacts/{contact_id}",
-                headers=_headers(),
-                json={"phone": notion_phone_e164},
-            )
-            resp.raise_for_status()
-            logger.info(
-                "GHL phone updated for %s: %s → %s",
-                contact_id, contact.get("phone"), notion_phone_e164,
-            )
-            return "updated"
-
-    except Exception as exc:
-        logger.warning("sync_phone_if_changed failed for %s: %s", contact_id, exc)
-        return "error"

@@ -1,6 +1,5 @@
-"""FalconConnect v3 — middleware layer for dual GHL + Notion sync."""
+"""FalconConnect v3 — lead management and CRM integration layer."""
 
-import asyncio
 import logging
 import os
 from datetime import datetime, timezone
@@ -10,12 +9,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from db.database import init_db
-from routers import leads, webhooks, calendar, analytics, admin, sync, licenses, agents, campaigns, ad_leads, close_webhooks, close_lead_status, conference
-from routers import ghl_cadence, cadence_sms
+from routers import leads, webhooks, calendar, analytics, admin, licenses, agents, campaigns, ad_leads, close_webhooks, close_lead_status, conference
+from routers import ghl_cadence, cadence_sms, research
 from routers.sheets import router as sheets_router
+from routers.ghl_dashboard import router as ghl_dashboard_router
 from routers.sms_templates import router as sms_templates_router
-from routers import ghl_dashboard
-from services.notion_ghl_sync import sync_loop
 
 logging.basicConfig(
     level=logging.INFO,
@@ -331,11 +329,6 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         logger.error("STARTUP GCal validation crashed: %s", exc)
 
-    # Start background Notion → GHL sync loop (disabled 2026-03-15 — was blocking app startup)
-    # sync_task = asyncio.create_task(sync_loop())
-    # logger.info("Notion→GHL background sync task started")
-    sync_task = None  # placeholder for shutdown logic
-
     # ── APScheduler: GHL dashboard sync every 4 hours ──
     scheduler = None
     try:
@@ -356,12 +349,6 @@ async def lifespan(app: FastAPI):
     # Shutdown
     if scheduler:
         scheduler.shutdown(wait=False)
-    if sync_task:
-        sync_task.cancel()
-        try:
-            await sync_task
-        except asyncio.CancelledError:
-            pass
     logger.info("FalconConnect v3 shutting down …")
 
 
@@ -397,8 +384,6 @@ async def root_health():
         "service": "FalconConnect v3",
         "version": "3.1.0",
         "clerk_configured": bool(settings.clerk_secret_key),
-        "sync_enabled": settings.notion_ghl_sync_enabled,
-        "sync_dry_run": settings.notion_ghl_sync_dry_run,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -449,28 +434,6 @@ async def seed_licenses_now():
 
 
 
-@app.get("/debug/env")
-async def debug_env():
-    """Temporary debug endpoint — checks raw env vars."""
-    import os
-    from pathlib import Path
-
-    from config import get_settings
-    settings = get_settings()
-    return {
-        "CLERK_SECRET_KEY_set": bool(os.environ.get("CLERK_SECRET_KEY", "")),
-        "CLERK_PUBLISHABLE_KEY_set": bool(os.environ.get("CLERK_PUBLISHABLE_KEY", "")),
-        "GHL_API_KEY_set": bool(os.environ.get("GHL_API_KEY", "")),
-        "CLOSE_API_KEY_set": bool(os.environ.get("CLOSE_API_KEY", "")),
-        "GOOGLE_REFRESH_TOKEN_set": bool(os.environ.get("GOOGLE_REFRESH_TOKEN", "")),
-        "settings_clerk_configured": bool(settings.clerk_secret_key),
-        "settings_close_configured": bool(settings.close_api_key),
-        "settings_gcal_configured": bool(settings.google_refresh_token),
-        "cwd": os.getcwd(),
-    }
-
-
-
 
 # API routers
 # BUG 11 FIX: Leads moved from /api/public to /api (requires Clerk auth)
@@ -479,7 +442,6 @@ app.include_router(webhooks.router, prefix="/api/webhooks", tags=["Webhooks"])
 app.include_router(calendar.router, prefix="/api/calendar", tags=["Calendar"])
 app.include_router(analytics.router, prefix="/api/analytics", tags=["Analytics"])
 app.include_router(admin.router, prefix="/api/admin", tags=["Admin"])
-app.include_router(sync.router, prefix="/api/sync", tags=["Sync"])
 app.include_router(licenses.router, prefix="/api/licenses", tags=["Licenses"])
 app.include_router(agents.router, prefix="/api/public", tags=["Agents"])
 app.include_router(ad_leads.router, prefix="/api/public", tags=["Ad Leads"])
@@ -487,15 +449,12 @@ app.include_router(sheets_router, prefix="/api/sheets", tags=["Sheets"])
 app.include_router(campaigns.router, prefix="/api/campaigns", tags=["Campaigns"])
 app.include_router(close_webhooks.router, prefix="/webhooks", tags=["Close Webhooks"])
 app.include_router(sms_templates_router, prefix="/api", tags=["SMS Templates"])
-from routers import research
 app.include_router(research.router, prefix="/api/research", tags=["Research"])
-from routers.ghl_dashboard import router as ghl_dashboard_router
 app.include_router(ghl_dashboard_router, prefix="/api", tags=["GHL Dashboard"])
 app.include_router(conference.router, prefix="/api", tags=["Conference Bridge"])
 app.include_router(ghl_cadence.router, prefix="/api/ghl", tags=["GHL Cadence"])
 app.include_router(cadence_sms.router, prefix="/api/close", tags=["Cadence SMS"])
 app.include_router(close_lead_status.router, prefix="/api/close", tags=["Close Lead Status Kill-Switch"])
-app.include_router(ghl_dashboard.router, tags=["GHL Dashboard"])
 
 @app.get("/api/health/gcal")
 async def health_gcal():

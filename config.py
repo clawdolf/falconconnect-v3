@@ -44,12 +44,6 @@ class Settings(BaseSettings):
     clerk_publishable_key: str = ""
     clerk_secret_key: str = ""
 
-    # --- Notion → GHL Sync ---
-    notion_ghl_sync_enabled: bool = True
-    notion_ghl_sync_dry_run: bool = True
-    notion_ghl_sync_after_date: str = "2026-03-03"
-    notion_ghl_sync_interval: int = 300
-
     # --- Calendar Email Domain (for dummy GCal ↔ Close linking emails) ---
     calendar_email_domain: str = "appt.invalid"
 
@@ -59,8 +53,7 @@ class Settings(BaseSettings):
     close_sms_from_number: str = ""
     close_webhook_secret: str = ""
 
-    # --- Google Calendar (Service Account) ---
-    google_service_account_json: str = ""
+    # --- Google Calendar ---
     google_calendar_id: str = "primary"
     google_client_id: str = ""
     google_client_secret: str = ""
@@ -73,11 +66,6 @@ class Settings(BaseSettings):
 
     # --- Quo (OpenPhone) ---
     quo_api_key: str = ""
-
-    # --- Plaid (Phase 2) ---
-    plaid_client_id: str = ""
-    plaid_secret: str = ""
-    plaid_env: str = "sandbox"
 
     # (GHL Dashboard uses ghl_private_token and ghl_location_id from the GHL section above)
 

@@ -5,12 +5,11 @@ Single capture (capture_lead) still writes to Notion → GHL (separate migration
 """
 
 import asyncio
-import json
 import logging
 from datetime import datetime
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,9 +17,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from db.database import get_session
 from db.models import LeadXref
 from middleware.auth import require_auth
-from services import close, ghl, notion
-from services.ghl import normalize_phone, split_phone_field
-from utils.age import calculate_age, calculate_lage
+from services import close, ghl
+from services.ghl import normalize_phone
 
 logger = logging.getLogger("falconconnect.leads")
 
@@ -253,105 +251,3 @@ async def bulk_import_leads(
     )
 
 
-# ── Single lead capture (kept for backwards compatibility) ──
-
-from models.lead import LeadCaptureResponse, LeadPayload
-
-
-@router.post(
-    "/leads/capture",
-    response_model=LeadCaptureResponse,
-    status_code=status.HTTP_201_CREATED,
-)
-async def capture_lead(
-    payload: LeadPayload,
-    user=Depends(require_auth),
-):
-    """Capture a new lead — Notion first, then GHL.
-
-    1. Calculate age from birth_year and lage_months from mail_date.
-    2. Upsert lead page in Notion (source of truth).
-    3. Upsert contact + create opportunity in GHL (automations).
-    4. Update Notion with GHL contact ID cross-reference.
-    5. Return IDs and calculated fields.
-    """
-    lead_dict = payload.model_dump()
-
-    # Normalize source
-    if payload.lead_source and not payload.source:
-        lead_dict["source"] = payload.lead_source
-
-    # Calculate derived fields
-    age = calculate_age(payload.birth_year) if payload.birth_year else None
-    lage_months = (
-        calculate_lage(payload.mail_date.isoformat()) if payload.mail_date else None
-    )
-
-    # --- STEP 1: Notion FIRST ---
-    try:
-        notion_result = await notion.upsert_lead(
-            lead_dict,
-            ghl_contact_id="",
-            age=age,
-            lage_months=lage_months,
-        )
-        notion_page_id = notion_result["page_id"]
-    except Exception as exc:
-        logger.error("Notion upsert_lead failed: %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Failed to push lead to Notion: {exc}",
-        )
-
-    # --- STEP 2: GHL SECOND ---
-    ghl_contact_id = ""
-    try:
-        ghl_contact = await ghl.upsert_contact(lead_dict)
-        ghl_contact_id = ghl_contact.get("id", "")
-
-        # Create opportunity
-        try:
-            opp_name = f"{payload.first_name} {payload.last_name} — {payload.lead_source or payload.source or 'web'}"
-            await ghl.create_opportunity(
-                ghl_contact_id,
-                stage_name="New Lead",
-                name=opp_name,
-            )
-        except Exception as exc:
-            logger.warning("GHL create_opportunity failed (non-fatal): %s", exc)
-
-        # Update Notion with GHL ID → write to "GHL ID" field (bare ID, no prefix)
-        if ghl_contact_id:
-            try:
-                notes = lead_dict.get("notes", "")
-                props: dict = {
-                    "GHL ID": {
-                        "rich_text": [{"text": {"content": ghl_contact_id}}]
-                    }
-                }
-                if notes:
-                    existing_comments = await notion._read_aggregate_comments(notion_page_id)
-                    merged = notes if not existing_comments else f"{existing_comments} | {notes}"
-                    props["Aggregate Comments"] = {
-                        "rich_text": [{"text": {"content": merged}}]
-                    }
-                await notion.update_page(notion_page_id, props)
-            except Exception:
-                pass
-
-    except Exception as exc:
-        # GHL failed but lead is in Notion — log warning, don't fail
-        logger.warning("GHL upsert_contact failed (lead in Notion): %s", exc)
-
-    logger.info(
-        "Lead captured: %s %s → Notion:%s / GHL:%s",
-        payload.first_name, payload.last_name,
-        notion_page_id, ghl_contact_id or "FAILED",
-    )
-
-    return LeadCaptureResponse(
-        ghl_id=ghl_contact_id,
-        notion_id=notion_page_id,
-        age=age,
-        lage_months=lage_months,
-    )
