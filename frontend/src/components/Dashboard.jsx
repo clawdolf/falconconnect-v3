@@ -1,6 +1,4 @@
 import { useState, useEffect } from 'react'
-import CalendarLinks from './CalendarLinks'
-import DryRunReport from './DryRunReport'
 
 function Dashboard() {
   const [health, setHealth] = useState(null)
@@ -61,10 +59,8 @@ function Dashboard() {
       </section>
 
       {/* Calendar Links */}
-      <CalendarLinks />
 
       {/* Dry Run */}
-      <DryRunReport />
     </div>
   )
 }
