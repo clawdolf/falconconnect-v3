@@ -177,7 +177,7 @@ async def bulk_import_leads(
             ghl_contact_id = ""
             try:
                 ghl_lead = item.model_dump()
-                ghl_lead["tags"] = ["r0-pending"]
+                ghl_lead["tags"] = ["RVM-pending"]
                 ghl_contact = await ghl.upsert_contact(ghl_lead)
                 ghl_contact_id = ghl_contact.get("id", "")
                 logger.info("Bulk import — GHL upsert OK: %s (GHL:%s)", lead_name, ghl_contact_id)
