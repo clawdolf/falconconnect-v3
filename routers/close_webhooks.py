@@ -362,6 +362,26 @@ async def _process_appointment(
             contact_id, lead_id
         )
 
+    # --- Pre-rebooking idempotency: skip if incoming datetime matches stored ---
+    # Close fires multiple events per edit. Duplicate fires have same appointment_dt
+    # after re-localization. Real changes differ. Check BEFORE any destructive ops.
+    if is_update and activity_id:
+        from datetime import timezone as _idt_tz
+        async with _get_session_factory()() as _idt_s:
+            _r = await _idt_s.execute(
+                select(AppointmentReminder.appointment_datetime).where(
+                    AppointmentReminder.activity_id == activity_id,
+                    AppointmentReminder.status == "active",
+                )
+            )
+            _stored_dt = _r.scalar_one_or_none()
+        if _stored_dt is not None:
+            _s = _stored_dt.astimezone(_idt_tz.utc) if _stored_dt.tzinfo else _stored_dt.replace(tzinfo=_idt_tz.utc)
+            _i = appointment_dt.astimezone(_idt_tz.utc) if appointment_dt.tzinfo else appointment_dt.replace(tzinfo=_idt_tz.utc)
+            if abs((_i - _s).total_seconds()) < 60:
+                logger.info("Idempotency guard: activity %s datetime unchanged (%.0fs diff) -- skipping duplicate for lead %s", activity_id, abs((_i - _s).total_seconds()), lead_id)
+                return {"status": "skipped", "reason": "datetime_unchanged", "activity_id": activity_id}
+
     # --- Check for rebooking — cancel old reminders/events if they exist ---
     # Use activity_id when available (reschedule of same activity) to avoid
     # duplicate GCal entries when Close fires multiple webhook events for one booking.
@@ -400,27 +420,8 @@ async def _process_appointment(
             # Mark old reminder as rebooked
             reminder.status = "rebooked"
 
-        # Capture updated_at values before session closes (avoid DetachedInstanceError)
-        rebooked_timestamps = []
-        for reminder in existing_reminders:
-            rebooked_timestamps.append(reminder.updated_at)
         if existing_reminders:
             await session.commit()
-
-    # --- Idempotency: skip if this activity was already rebooked within 60 seconds ---
-    if is_update and activity_id and existing_reminders:
-        from datetime import timezone as _tz
-        now_utc = datetime.now(_tz.utc)
-        for upd in rebooked_timestamps:
-            if upd is not None:
-                if upd.tzinfo is None:
-                    upd = upd.replace(tzinfo=_tz.utc)
-                if (now_utc - upd).total_seconds() < 60:
-                    logger.info(
-                        "Idempotency guard: activity %s rebooked %.1fs ago — skipping duplicate event for lead %s",
-                        activity_id, (now_utc - upd).total_seconds(), lead_id,
-                    )
-                    return {"status": "skipped", "reason": "recent_rebook", "activity_id": activity_id}
 
     # --- Step 1: Send SMS (confirmation + schedule reminders) ---
     sms_results: dict = {"confirmation": None, "reminder_24hr": None, "reminder_1hr": None}
