@@ -237,6 +237,7 @@ def _extract_phone(contact: dict) -> Optional[str]:
 async def _process_appointment(
     activity_data: dict,
     lead_id: str,
+    is_update: bool = False,
 ) -> dict:
     """Process a Book Appointment activity — send SMS, create GCal, link email.
 
@@ -265,7 +266,7 @@ async def _process_appointment(
                     AppointmentReminder.status == "active",
                 )
             )
-            if existing.scalar_one_or_none():
+            if existing.scalar_one_or_none() and not is_update:
                 logger.info(
                     "Duplicate webhook — activity %s already processed for lead %s, skipping",
                     activity_id,
@@ -723,7 +724,7 @@ async def close_webhook(request: Request):
                 changed_fields,
             )
             # _process_appointment already handles rebooking (cancels old, creates new)
-            result = await _process_appointment(event_data, lead_id)
+            result = await _process_appointment(event_data, lead_id, is_update=True)
             return result
 
         # Other field updates on an existing appointment — skip
