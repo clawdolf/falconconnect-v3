@@ -252,7 +252,9 @@ async def _process_appointment(
 
     # --- Skip drafts — Close fires 'created' on draft saves before publish ---
     activity_status = activity_data.get("status", "published")
-    if activity_status == "draft":
+    # Only skip drafts on new bookings. Updates (e.g. timezone change) transiently
+    # set status=draft in the payload — skipping here would silently drop the reschedule.
+    if activity_status == "draft" and not is_update:
         logger.info("Skipping draft activity for lead %s", lead_id)
         return {"status": "skipped", "reason": "draft"}
 
