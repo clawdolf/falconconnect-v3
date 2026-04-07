@@ -32,6 +32,7 @@ function LeadImport() {
   const [perFileMaps, setPerFileMaps] = useState({})
   const [mappingFileIdx, setMappingFileIdx] = useState(0)
   const [adjustAge, setAdjustAge] = useState(false)
+  const [enableRvm, setEnableRvm] = useState(true)
 
   const { getToken } = useAuth()
 
@@ -50,7 +51,7 @@ function LeadImport() {
     setColumnMap({}); setInitialAutoMap({}); setApplyMappingToAll(true); setMappingWarning('')
     setError(null); setGrandResult(null); setSheetUrl(''); setSheetLoading(false); setPreviewTab(0)
     setProgress({ current: 0, total: 0, fileIndex: 0, fileName: '' })
-    setPerFileMaps({}); setMappingFileIdx(0); setAdjustAge(false)
+    setPerFileMaps({}); setMappingFileIdx(0); setAdjustAge(false); setEnableRvm(true)
   }
 
   const parseOneFile = async (file) => {
@@ -217,7 +218,7 @@ function LeadImport() {
       for (let i = 0; i < leads.length; i += BS) {
         const batch = leads.slice(i, i + BS)
         try {
-          const resp = await fetch('/api/leads/bulk', { method: 'POST', headers: authHdrs, body: JSON.stringify({ leads: batch, dry_run: dryRun, test_mode: testMode }) })
+          const resp = await fetch('/api/leads/bulk', { method: 'POST', headers: authHdrs, body: JSON.stringify({ leads: batch, dry_run: dryRun, test_mode: testMode, enable_rvm: enableRvm }) })
           if (resp.ok) {
             const d = await resp.json(); fileCreated += (d.created || 0) + (d.updated || 0); fileFailed += d.failed || 0
             if (d.errors) fileErrors.push(...d.errors); if (d.ghl_warnings) fileGhlWarnings.push(...d.ghl_warnings)
@@ -541,7 +542,18 @@ function LeadImport() {
                 <p className="form-hint">Showing first {previewDataByFile[previewTab].previewLeads.length} of {previewDataByFile[previewTab].totalLeads} leads.</p>
               </div>
             )}
-            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1rem', gap: '0.5rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', marginTop: '1rem', gap: '0.75rem' }}>
+              {!dryRun && (
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: '0.75rem', color: enableRvm ? 'var(--text)' : 'var(--text-muted)' }}>
+                  <input
+                    type="checkbox"
+                    checked={enableRvm}
+                    onChange={e => setEnableRvm(e.target.checked)}
+                    style={{ accentColor: 'var(--accent)', width: 15, height: 15, cursor: 'pointer' }}
+                  />
+                  Enable RVM
+                </label>
+              )}
               <button className="btn btn-primary" onClick={doImport}>
                 {dryRun ? 'Dry Run' : 'Import'} {totalLeadsAcrossFiles} Leads
               </button>

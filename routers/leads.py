@@ -80,6 +80,7 @@ class BulkImportRequest(BaseModel):
     leads: List[BulkLeadItem]
     dry_run: bool = False
     test_mode: bool = False  # If True: forces tier='TEST', adds 'test-import' tag in GHL, writes normally so you can diagnose + delete
+    enable_rvm: bool = True  # If True: GHL tag=RVM-pending, Close cadence=1. r0-pending; If False: GHL tag=rvm-skipped, Close cadence=2. r1-calling
 
 
 class BulkImportError(BaseModel):
@@ -142,7 +143,7 @@ async def bulk_import_leads(
             # ── STEP 1: Close.com (primary CRM) ──
             # If Close fails, count as failed and skip
             try:
-                close_result = await close.create_lead(lead_dict)
+                close_result = await close.create_lead(lead_dict, enable_rvm=req.enable_rvm)
                 close_lead_id = close_result["id"]
             except Exception as exc:
                 failed += 1
@@ -177,7 +178,7 @@ async def bulk_import_leads(
             ghl_contact_id = ""
             try:
                 ghl_lead = item.model_dump()
-                ghl_lead["tags"] = ["RVM-pending"]
+                ghl_lead["tags"] = ["RVM-pending"] if req.enable_rvm else ["rvm-skipped"]
                 ghl_contact = await ghl.upsert_contact(ghl_lead)
                 ghl_contact_id = ghl_contact.get("id", "")
                 logger.info("Bulk import — GHL upsert OK: %s (GHL:%s)", lead_name, ghl_contact_id)

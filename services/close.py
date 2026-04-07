@@ -219,7 +219,7 @@ def _lage_select(months: Optional[int]) -> Optional[str]:
 # ── Core API: create lead ──
 
 
-async def create_lead(lead_dict: dict) -> dict:
+async def create_lead(lead_dict: dict, enable_rvm: bool = True) -> dict:
     """Create a lead in Close.com from an FC lead dict.
 
     Maps all FC fields to the Close API payload:
@@ -347,8 +347,9 @@ async def create_lead(lead_dict: dict) -> dict:
     if lead_age_bucket:
         _set_cf("Lead Age", lead_age_bucket)
 
-    # Cadence Stage — all bulk imports start at r0-pending
-    _set_cf("Cadence Stage", "1. r0-pending")
+    # Cadence Stage — depends on enable_rvm flag
+    cadence_stage = "1. r0-pending" if enable_rvm else "2. r1-calling"
+    _set_cf("Cadence Stage", cadence_stage)
 
     # Age (number: current year - birth_year)
     birth_year = lead_dict.get("birth_year")
