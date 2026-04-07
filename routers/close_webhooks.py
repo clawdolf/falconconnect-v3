@@ -526,7 +526,6 @@ async def _process_appointment(
                     logger.error("GCal rollback failed for %s: %s", gcal_event_id, gcal_del_exc)
             for sms_id in [v for v in sms_results.values() if v]:
                 try:
-                    from services.close_sms import cancel_scheduled_sms
                     await cancel_scheduled_sms(sms_id)
                     logger.info("SMS rollback: cancelled orphaned SMS %s", sms_id)
                 except Exception as sms_del_exc:
