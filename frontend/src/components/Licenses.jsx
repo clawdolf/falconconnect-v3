@@ -220,6 +220,7 @@ function Licenses() {
         state: editData.state,
         state_abbreviation: editData.state_abbreviation || STATE_MAP[editData.state] || '',
         license_number: editData.license_number || null,
+        verify_url: editData.verify_url || null,
       }
       const resp = await fetch(`/api/licenses/${id}`, { method: 'PUT', headers, body: JSON.stringify(body) })
       if (!resp.ok) {
@@ -246,7 +247,7 @@ function Licenses() {
 
   const startEdit = (lic) => {
     setEditingId(lic.id)
-    setEditData({ state: lic.state, state_abbreviation: lic.state_abbreviation, license_number: lic.license_number || '' })
+    setEditData({ state: lic.state, state_abbreviation: lic.state_abbreviation, license_number: lic.license_number || '', verify_url: lic.verify_url || '' })
     setDeleteConfirm(null); setShowAddForm(false)
   }
 
@@ -369,6 +370,20 @@ function Licenses() {
                   <div className="form-field">
                     <label className="form-label">License #</label>
                     <input className="form-input" type="text" placeholder="Optional" value={editData.license_number || ''} onChange={e => setEditData(d => ({ ...d, license_number: e.target.value }))} />
+                  </div>
+                  <div className="form-field" style={{ gridColumn: '1 / -1' }}>
+                    <label className="form-label">Verify Link</label>
+                    <input
+                      className="form-input"
+                      type="url"
+                      placeholder="https://..."
+                      value={editData.verify_url || ''}
+                      onChange={e => setEditData(d => ({ ...d, verify_url: e.target.value }))}
+                      style={{ fontFamily: 'var(--font-mono)', fontSize: '0.78rem' }}
+                    />
+                    <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.2rem', display: 'block' }}>
+                      Override the verification link shown on the consumer site. Leave blank to auto-generate from state.
+                    </span>
                   </div>
                 </div>
                 <div style={{ marginTop: '0.75rem', display: 'flex', gap: '0.5rem' }}>
