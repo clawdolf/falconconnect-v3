@@ -1,13 +1,22 @@
 import { useState, useEffect } from 'react'
 import { useAuthSafe as useAuth } from '../hooks/useClerkSafe'
 
-const TEMPLATE_LABELS = {
-  confirmation: 'Confirmation',
-  reminder_24hr: '24hr Reminder',
-  reminder_1hr: '1hr Reminder',
-}
+// Appointment SMS section templates
+const APPOINTMENT_TEMPLATES = [
+  { key: 'confirmation', label: 'Confirmation', hint: 'sent immediately on booking' },
+  { key: 'reminder_24hr', label: '24hr Reminder', hint: 'sent 24 hours before appointment' },
+  { key: 'reminder_1hr', label: '1hr Reminder', hint: 'sent 1 hour before appointment' },
+]
 
-const MERGE_FIELDS = ['{{name}}', '{{date}}', '{{time}}', '{{timezone}}', '{{phone}}']
+// Workflow SMS section templates
+const WORKFLOW_TEMPLATES = [
+  { key: 'r1_done', label: 'R1 Done', hint: 'fires after you mark r1-done, sent next morning' },
+  { key: 'r2_done', label: 'R2 Done', hint: 'fires after you mark r2-done, sent next morning' },
+  { key: 'r3_done', label: 'R3 Done', hint: 'fires after you mark r3-done, sent next morning — then auto-moves lead to nurture' },
+]
+
+const APPOINTMENT_MERGE_FIELDS = ['{{name}}', '{{date}}', '{{time}}', '{{timezone}}', '{{phone}}']
+const WORKFLOW_MERGE_FIELDS = ['{first_name}', '{state}']
 
 const SMS_SEGMENT_LENGTH = 160
 
@@ -17,9 +26,239 @@ function charCount(text) {
   return { len, segments }
 }
 
+function ChevronIcon({ open }) {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 12 12"
+      fill="none"
+      style={{
+        transform: open ? 'rotate(180deg)' : 'rotate(0deg)',
+        transition: 'transform 0.15s ease',
+        flexShrink: 0,
+      }}
+    >
+      <path
+        d="M2 4L6 8L10 4"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+
+function TemplateCard({ template, body, onUpdate, onSave, saving, saved }) {
+  const { len, segments } = charCount(body || '')
+  return (
+    <div
+      style={{
+        marginBottom: '1rem',
+        background: 'var(--surface)',
+        border: '1px solid var(--border)',
+        borderRadius: 4,
+        padding: '1rem',
+      }}
+    >
+      <div style={{ marginBottom: '0.4rem' }}>
+        <span style={{
+          fontFamily: 'var(--font-mono)',
+          fontSize: '0.72rem',
+          fontWeight: 600,
+          color: 'var(--text)',
+          letterSpacing: '0.06em',
+        }}>
+          {template.label}
+        </span>
+        {template.hint && (
+          <span style={{
+            fontFamily: 'var(--font-mono)',
+            fontSize: '0.6rem',
+            color: 'var(--text-muted)',
+            marginLeft: '0.5rem',
+          }}>
+            — {template.hint}
+          </span>
+        )}
+      </div>
+
+      <textarea
+        value={body || ''}
+        onChange={(e) => onUpdate(template.key, e.target.value)}
+        rows={4}
+        style={{
+          width: '100%',
+          background: 'var(--bg)',
+          color: 'var(--text)',
+          border: '1px solid var(--border)',
+          borderRadius: 4,
+          padding: '0.5rem',
+          fontFamily: 'var(--font-mono)',
+          fontSize: '0.72rem',
+          lineHeight: 1.6,
+          resize: 'vertical',
+          boxSizing: 'border-box',
+        }}
+      />
+
+      <div style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginTop: '0.4rem',
+        flexWrap: 'wrap',
+        gap: '0.4rem',
+      }}>
+        <span style={{
+          fontFamily: 'var(--font-mono)',
+          fontSize: '0.6rem',
+          color: len > SMS_SEGMENT_LENGTH ? 'var(--accent)' : 'var(--text-muted)',
+        }}>
+          {len} chars · {segments} segment{segments > 1 ? 's' : ''}
+        </span>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          {saved && (
+            <span style={{
+              fontFamily: 'var(--font-mono)',
+              fontSize: '0.6rem',
+              color: '#4caf50',
+            }}>
+              Saved
+            </span>
+          )}
+          <button
+            onClick={() => onSave(template.key, body)}
+            disabled={saving}
+            style={{
+              background: 'var(--accent)',
+              color: '#000',
+              border: 'none',
+              borderRadius: 4,
+              padding: '0.35rem 0.75rem',
+              fontFamily: 'var(--font-mono)',
+              fontSize: '0.65rem',
+              fontWeight: 600,
+              letterSpacing: '0.06em',
+              cursor: 'pointer',
+              opacity: saving ? 0.6 : 1,
+            }}
+          >
+            {saving ? 'SAVING...' : 'SAVE'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function CollapsibleSection({ title, subtitle, mergeFields, templates, bodies, onUpdate, onSave, saving, saved, defaultOpen }) {
+  const [open, setOpen] = useState(defaultOpen !== false)
+
+  return (
+    <div style={{ marginBottom: '1.5rem' }}>
+      <button
+        onClick={() => setOpen((o) => !o)}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.5rem',
+          width: '100%',
+          background: 'none',
+          border: 'none',
+          borderBottom: '1px solid var(--border)',
+          borderRadius: 0,
+          padding: '0.5rem 0',
+          cursor: 'pointer',
+          textAlign: 'left',
+          color: 'var(--text)',
+          marginBottom: open ? '1rem' : 0,
+        }}
+      >
+        <span style={{
+          fontFamily: 'var(--font-mono)',
+          fontSize: '0.78rem',
+          fontWeight: 700,
+          letterSpacing: '0.08em',
+          color: 'var(--text)',
+          flex: 1,
+        }}>
+          {title}
+        </span>
+        {subtitle && (
+          <span style={{
+            fontFamily: 'var(--font-mono)',
+            fontSize: '0.58rem',
+            color: 'var(--text-muted)',
+            marginRight: '0.5rem',
+          }}>
+            {subtitle}
+          </span>
+        )}
+        <ChevronIcon open={open} />
+      </button>
+
+      {open && (
+        <div>
+          {templates.map((t) => (
+            <TemplateCard
+              key={t.key}
+              template={t}
+              body={bodies[t.key] || ''}
+              onUpdate={onUpdate}
+              onSave={onSave}
+              saving={saving[t.key]}
+              saved={saved[t.key]}
+            />
+          ))}
+
+          <div style={{
+            background: 'var(--surface)',
+            border: '1px solid var(--border)',
+            borderRadius: 4,
+            padding: '0.6rem 0.75rem',
+            marginBottom: '0.5rem',
+          }}>
+            <p style={{
+              fontFamily: 'var(--font-mono)',
+              fontSize: '0.6rem',
+              fontWeight: 600,
+              color: 'var(--text-muted)',
+              letterSpacing: '0.06em',
+              marginBottom: '0.35rem',
+            }}>
+              AVAILABLE VARIABLES
+            </p>
+            <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+              {mergeFields.map((field) => (
+                <code
+                  key={field}
+                  style={{
+                    background: 'var(--bg)',
+                    border: '1px solid var(--border)',
+                    borderRadius: 3,
+                    padding: '0.1rem 0.35rem',
+                    fontFamily: 'var(--font-mono)',
+                    fontSize: '0.62rem',
+                    color: 'var(--accent)',
+                  }}
+                >
+                  {field}
+                </code>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function SmsTemplates() {
   const { getToken } = useAuth()
-  const [templates, setTemplates] = useState([])
+  const [bodies, setBodies] = useState({})
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState({})
   const [saved, setSaved] = useState({})
@@ -46,7 +285,9 @@ export default function SmsTemplates() {
       const resp = await fetch('/api/sms-templates', { headers })
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
       const data = await resp.json()
-      setTemplates(data)
+      const map = {}
+      data.forEach((t) => { map[t.template_key] = t.body })
+      setBodies(map)
     } catch (err) {
       setError('Failed to load templates: ' + err.message)
     } finally {
@@ -69,16 +310,14 @@ export default function SmsTemplates() {
       setSaved((s) => ({ ...s, [key]: true }))
       setTimeout(() => setSaved((s) => ({ ...s, [key]: false })), 2000)
     } catch (err) {
-      setError(`Failed to save ${TEMPLATE_LABELS[key]}: ${err.message}`)
+      setError(`Failed to save template: ${err.message}`)
     } finally {
       setSaving((s) => ({ ...s, [key]: false }))
     }
   }
 
   function updateBody(key, newBody) {
-    setTemplates((prev) =>
-      prev.map((t) => (t.template_key === key ? { ...t, body: newBody } : t))
-    )
+    setBodies((prev) => ({ ...prev, [key]: newBody }))
   }
 
   if (loading) {
@@ -111,7 +350,7 @@ export default function SmsTemplates() {
         marginBottom: '1.5rem',
         lineHeight: 1.5,
       }}>
-        Edit appointment reminder SMS templates. Use merge fields to personalize messages.
+        Edit SMS templates for appointments and cadence workflow. Changes take effect immediately.
       </p>
 
       {error && (
@@ -129,146 +368,31 @@ export default function SmsTemplates() {
         </div>
       )}
 
-      {templates.map((t) => {
-        const { len, segments } = charCount(t.body)
-        return (
-          <div
-            key={t.template_key}
-            style={{
-              marginBottom: '1.5rem',
-              background: 'var(--surface)',
-              border: '1px solid var(--border)',
-              borderRadius: 4,
-              padding: '1rem',
-            }}
-          >
-            <label style={{
-              display: 'block',
-              fontFamily: 'var(--font-mono)',
-              fontSize: '0.72rem',
-              fontWeight: 600,
-              color: 'var(--text)',
-              letterSpacing: '0.06em',
-              marginBottom: '0.5rem',
-            }}>
-              {TEMPLATE_LABELS[t.template_key] || t.template_key}
-            </label>
+      <CollapsibleSection
+        title="APPOINTMENT SMS"
+        subtitle="booking confirmations & reminders"
+        mergeFields={APPOINTMENT_MERGE_FIELDS}
+        templates={APPOINTMENT_TEMPLATES}
+        bodies={bodies}
+        onUpdate={updateBody}
+        onSave={saveTemplate}
+        saving={saving}
+        saved={saved}
+        defaultOpen={true}
+      />
 
-            <textarea
-              value={t.body}
-              onChange={(e) => updateBody(t.template_key, e.target.value)}
-              rows={4}
-              style={{
-                width: '100%',
-                background: 'var(--bg)',
-                color: 'var(--text)',
-                border: '1px solid var(--border)',
-                borderRadius: 4,
-                padding: '0.5rem',
-                fontFamily: 'var(--font-mono)',
-                fontSize: '0.72rem',
-                lineHeight: 1.6,
-                resize: 'vertical',
-                boxSizing: 'border-box',
-              }}
-            />
-
-            <div style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              marginTop: '0.4rem',
-              flexWrap: 'wrap',
-              gap: '0.4rem',
-            }}>
-              <span style={{
-                fontFamily: 'var(--font-mono)',
-                fontSize: '0.6rem',
-                color: len > SMS_SEGMENT_LENGTH ? 'var(--accent)' : 'var(--text-muted)',
-              }}>
-                {len} chars · {segments} segment{segments > 1 ? 's' : ''}
-              </span>
-
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                {saved[t.template_key] && (
-                  <span style={{
-                    fontFamily: 'var(--font-mono)',
-                    fontSize: '0.6rem',
-                    color: '#4caf50',
-                  }}>
-                    Saved
-                  </span>
-                )}
-                <button
-                  onClick={() => saveTemplate(t.template_key, t.body)}
-                  disabled={saving[t.template_key]}
-                  style={{
-                    background: 'var(--accent)',
-                    color: '#000',
-                    border: 'none',
-                    borderRadius: 4,
-                    padding: '0.35rem 0.75rem',
-                    fontFamily: 'var(--font-mono)',
-                    fontSize: '0.65rem',
-                    fontWeight: 600,
-                    letterSpacing: '0.06em',
-                    cursor: 'pointer',
-                    opacity: saving[t.template_key] ? 0.6 : 1,
-                  }}
-                >
-                  {saving[t.template_key] ? 'SAVING...' : 'SAVE'}
-                </button>
-              </div>
-            </div>
-          </div>
-        )
-      })}
-
-      <div style={{
-        background: 'var(--surface)',
-        border: '1px solid var(--border)',
-        borderRadius: 4,
-        padding: '0.75rem',
-      }}>
-        <p style={{
-          fontFamily: 'var(--font-mono)',
-          fontSize: '0.65rem',
-          fontWeight: 600,
-          color: 'var(--text)',
-          letterSpacing: '0.06em',
-          marginBottom: '0.4rem',
-        }}>
-          MERGE FIELDS
-        </p>
-        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-          {MERGE_FIELDS.map((field) => (
-            <code
-              key={field}
-              style={{
-                background: 'var(--bg)',
-                border: '1px solid var(--border)',
-                borderRadius: 3,
-                padding: '0.15rem 0.4rem',
-                fontFamily: 'var(--font-mono)',
-                fontSize: '0.62rem',
-                color: 'var(--accent)',
-              }}
-            >
-              {field}
-            </code>
-          ))}
-        </div>
-        <p style={{
-          fontFamily: 'var(--font-mono)',
-          fontSize: '0.58rem',
-          color: 'var(--text-muted)',
-          marginTop: '0.4rem',
-          lineHeight: 1.4,
-        }}>
-          These fields are replaced with actual values when the SMS is sent.
-          SMS segments are 160 characters each — longer messages use multiple segments.
-        </p>
-      </div>
+      <CollapsibleSection
+        title="WORKFLOW SMS"
+        subtitle="cadence blitz follow-ups"
+        mergeFields={WORKFLOW_MERGE_FIELDS}
+        templates={WORKFLOW_TEMPLATES}
+        bodies={bodies}
+        onUpdate={updateBody}
+        onSave={saveTemplate}
+        saving={saving}
+        saved={saved}
+        defaultOpen={true}
+      />
     </div>
   )
 }
