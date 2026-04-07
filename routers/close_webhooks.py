@@ -447,20 +447,44 @@ async def _process_appointment(
         }
 
     # --- Step 3: Save to database ---
+    # Upsert on activity_id — same activity rescheduled = update existing row.
+    # Inserting a new row with the same activity_id would hit the unique constraint.
     async with _get_session_factory()() as session:
-        # Save appointment reminder record
-        reminder = AppointmentReminder(
-            lead_id=lead_id,
-            contact_id=contact_id,
-            activity_id=activity_id,
-            appointment_datetime=appointment_dt,
-            sms_id_confirmation=sms_results.get("confirmation"),
-            sms_id_24hr=sms_results.get("reminder_24hr"),
-            sms_id_1hr=sms_results.get("reminder_1hr"),
-            gcal_event_id=gcal_event_id,
-            status="active",
-        )
-        session.add(reminder)
+        # Check for existing reminder with this activity_id (any status)
+        existing_reminder = None
+        if activity_id:
+            result = await session.execute(
+                select(AppointmentReminder).where(
+                    AppointmentReminder.activity_id == activity_id
+                )
+            )
+            existing_reminder = result.scalar_one_or_none()
+
+        if existing_reminder:
+            # Update in place — rebooking of the same activity
+            existing_reminder.appointment_datetime = appointment_dt
+            existing_reminder.sms_id_confirmation = sms_results.get("confirmation")
+            existing_reminder.sms_id_24hr = sms_results.get("reminder_24hr")
+            existing_reminder.sms_id_1hr = sms_results.get("reminder_1hr")
+            existing_reminder.gcal_event_id = gcal_event_id
+            existing_reminder.status = "active"
+            logger.info(
+                "Updated existing AppointmentReminder for activity %s (lead %s)",
+                activity_id, lead_id,
+            )
+        else:
+            reminder = AppointmentReminder(
+                lead_id=lead_id,
+                contact_id=contact_id,
+                activity_id=activity_id,
+                appointment_datetime=appointment_dt,
+                sms_id_confirmation=sms_results.get("confirmation"),
+                sms_id_24hr=sms_results.get("reminder_24hr"),
+                sms_id_1hr=sms_results.get("reminder_1hr"),
+                gcal_event_id=gcal_event_id,
+                status="active",
+            )
+            session.add(reminder)
 
         # Upsert calendar email mapping
         result = await session.execute(
@@ -480,7 +504,23 @@ async def _process_appointment(
             )
             session.add(cal_email)
 
-        await session.commit()
+        try:
+            await session.commit()
+        except Exception as db_exc:
+            # DB write failed — delete the GCal event we just created so it
+            # doesn't orphan (no DB record = can never be cleaned up later).
+            logger.error(
+                "DB commit failed for appointment (lead %s, activity %s): %s — "
+                "rolling back GCal event %s",
+                lead_id, activity_id, db_exc, gcal_event_id,
+            )
+            if gcal_event_id:
+                try:
+                    await delete_event(gcal_event_id)
+                    logger.info("GCal rollback: deleted orphaned event %s", gcal_event_id)
+                except Exception as gcal_del_exc:
+                    logger.error("GCal rollback failed for %s: %s", gcal_event_id, gcal_del_exc)
+            raise
 
     logger.info(
         "Appointment processed: lead=%s contact=%s dt=%s gcal=%s sms=%s",
