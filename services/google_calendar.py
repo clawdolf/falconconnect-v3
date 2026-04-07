@@ -195,10 +195,10 @@ async def create_appointment_event(
         },
     }
 
-    # Attendees intentionally omitted — adding a dummy email (lead-xxx@appt.invalid)
-    # causes Google to generate undeliverable bounce emails to the calendar owner.
-    # The event description already contains the Close lead URL for lookup.
-    # attendee_email arg kept for API compatibility but not used.
+    if attendee_email:
+        event_body["attendees"] = [
+            {"email": attendee_email, "responseStatus": "accepted"},
+        ]
 
     service = _get_calendar_service()
 
