@@ -25,6 +25,41 @@ logger = logging.getLogger("falconconnect.leads")
 router = APIRouter()
 
 
+# -- Lead field normalization --
+
+def _title(val):
+    if not val:
+        return val
+    skip_upper = {"llc", "inc", "na", "n/a", "usa", "fha", "va", "usda", "arm"}
+    words = val.strip().split()
+    out = []
+    for w in words:
+        if w.lower() in skip_upper:
+            out.append(w.upper())
+        elif "'" in w:
+            out.append("'".join(p.capitalize() for p in w.split("'")))
+        else:
+            out.append(w.capitalize())
+    return " ".join(out)
+
+
+def _normalize_lead(d: dict) -> dict:
+    title_fields = [
+        "first_name", "last_name", "city", "county", "lender",
+        "address", "best_time_to_call",
+    ]
+    for f in title_fields:
+        if d.get(f):
+            d[f] = _title(d[f])
+    if d.get("email"):
+        d["email"] = d["email"].strip().lower()
+    if d.get("state") and len(d["state"].strip()) == 2:
+        d["state"] = d["state"].strip().upper()
+    if d.get("notes"):
+        d["notes"] = d["notes"].strip()
+    return d
+
+
 # ── Bulk import models ──
 
 
@@ -129,6 +164,7 @@ async def bulk_import_leads(
         lead_name = f"{item.first_name} {item.last_name}"
         try:
             lead_dict = item.model_dump()
+            _normalize_lead(lead_dict)
 
             # Test mode: override tier to TEST so records are easy to find + delete
             if req.test_mode:
