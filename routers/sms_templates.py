@@ -55,7 +55,7 @@ async def update_template(
     session: AsyncSession = Depends(get_session),
 ):
     """Update an SMS template body."""
-    if key not in ("confirmation", "reminder_24hr", "reminder_1hr"):
+    if key not in ("confirmation", "reminder_24hr", "reminder_1hr", "r1_done", "r2_done", "r3_done"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Invalid template key: {key}",
