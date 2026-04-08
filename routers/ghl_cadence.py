@@ -52,10 +52,41 @@ def _close_auth() -> tuple:
     return (settings.close_api_key, "")
 
 
+async def _search_close_by_ghl_id(ghl_contact_id: str) -> Optional[dict]:
+    """Search Close for an existing lead by GHL contact ID stored in custom field.
+
+    This is the most reliable fallback when LeadXref has no row — the GHL contact ID
+    is written to CF_GHL_ID custom field on every import via STEP 3b.
+    """
+    if not ghl_contact_id:
+        return None
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.get(
+                f"{CLOSE_API_BASE}/lead/",
+                params={
+                    "query": ghl_contact_id,
+                    "_fields": "id,display_name",
+                    "_limit": 1,
+                },
+                auth=_close_auth(),
+            )
+            resp.raise_for_status()
+            data = resp.json().get("data", [])
+            if data:
+                logger.info("Close GHL-ID search hit for %s: %s", ghl_contact_id, data[0].get("id"))
+                return data[0]
+    except Exception as exc:
+        logger.error("Close GHL-ID search failed for %s: %s", ghl_contact_id, exc)
+
+    return None
+
+
 async def _search_close_by_phone(phone: str) -> Optional[dict]:
     """Search Close for an existing lead by phone number.
 
-    Uses Close's lead search endpoint with phone query.
+    Uses Close's search API with the correct phone_number mode.
     Returns the first matching lead dict, or None.
     """
     if not phone:
@@ -84,11 +115,11 @@ async def _search_close_by_phone(phone: str) -> Optional[dict]:
                                             "field": {
                                                 "type": "regular_field",
                                                 "object_type": "contact",
-                                                "field_name": "phones.phone",
+                                                "field_name": "phone",
                                             },
                                             "condition": {
                                                 "type": "text",
-                                                "mode": "full_words",
+                                                "mode": "phone_number",
                                                 "value": phone,
                                             },
                                         }
@@ -98,7 +129,7 @@ async def _search_close_by_phone(phone: str) -> Optional[dict]:
                         ],
                     },
                     "_fields": {
-                        "lead": ["id", "display_name", "contacts"],
+                        "lead": ["id", "display_name"],
                     },
                     "_limit": 1,
                 },
@@ -324,8 +355,12 @@ async def ghl_rvm_complete(
         except Exception as xref_exc:
             logger.warning("LeadXref lookup failed for %s: %s", ghl_contact_id, xref_exc)
 
+    if not existing_lead:
+        logger.info("LeadXref miss for GHL %s — searching Close by GHL contact ID", ghl_contact_id)
+        existing_lead = await _search_close_by_ghl_id(ghl_contact_id)
+
     if not existing_lead and phone:
-        logger.info("LeadXref miss for GHL %s — falling back to phone search", ghl_contact_id)
+        logger.info("GHL-ID search miss for %s — falling back to phone search", ghl_contact_id)
         existing_lead = await _search_close_by_phone(phone)
 
     if existing_lead:
