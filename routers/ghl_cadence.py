@@ -281,23 +281,8 @@ async def ghl_rvm_complete(
         )
         return {"status": "skipped", "reason": "no contact ID"}
 
-    if not phone:
-        logger.warning(
-            "No phone number for GHL contact %s — skipping Close sync",
-            ghl_contact_id,
-        )
-        await _log_sync(
-            session,
-            event_type="ghl.rvm_complete",
-            source_id=ghl_contact_id,
-            status="skipped",
-            error_detail="no phone number",
-            payload=raw_body,
-        )
-        return {"status": "skipped", "reason": "no phone number"}
-
     # Look up Close lead via LeadXref (GHL contact ID → Close lead ID)
-    # Falls back to phone search if not found in xref table.
+    # Phone is only required for the fallback phone search, not for xref lookup.
     existing_lead = None
     if ghl_contact_id:
         try:
