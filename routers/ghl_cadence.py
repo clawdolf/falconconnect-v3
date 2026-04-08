@@ -20,6 +20,7 @@ from typing import Optional
 
 import httpx
 from fastapi import APIRouter, Depends, Request
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import get_settings
