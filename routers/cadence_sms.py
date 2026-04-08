@@ -275,10 +275,12 @@ async def _update_cadence_stage(lead_id: str, stage: str) -> bool:
 
 
 def _calc_next_morning_utc(state: str) -> str:
-    """Calculate next 8:30am in lead's local timezone, return as UTC ISO string.
+    """Calculate next 9:00am in lead's local timezone, return as UTC ISO string.
 
-    If it's currently before 8:30am in lead's tz → schedule for today 8:30am.
-    If it's after 8:30am → schedule for tomorrow 8:30am.
+    9am local time per state — west coast gets 9am PT, east coast 9am ET, etc.
+    Falls back to America/Chicago when state is unknown.
+    If it's currently before 9:00am in lead's tz → schedule for today 9:00am.
+    If it's after 9:00am → schedule for tomorrow 9:00am.
     """
     from datetime import datetime, timezone as dt_tz
     from zoneinfo import ZoneInfo
@@ -287,9 +289,9 @@ def _calc_next_morning_utc(state: str) -> str:
     tz = ZoneInfo(tz_name)
     now_local = datetime.now(tz)
 
-    target = now_local.replace(hour=8, minute=30, second=0, microsecond=0)
+    target = now_local.replace(hour=9, minute=0, second=0, microsecond=0)
     if target <= now_local:
-        # Past 8:30am today → use tomorrow
+        # Past 9:00am today → use tomorrow
         from datetime import timedelta
         target = target + timedelta(days=1)
 
