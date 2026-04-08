@@ -87,6 +87,44 @@ def _widen_alembic_version_column(db_url: str) -> None:
         print(f"[startup] alembic_version column widen warning (non-fatal): {exc}", flush=True)
 
 
+
+def _fix_lead_xref_schema(db_url: str) -> None:
+    """Ensure lead_xref has close_lead_id column (migration 015 may have been skipped)."""
+    try:
+        import asyncio
+        import asyncpg
+
+        url = db_url
+        if url.startswith('postgres://'):
+            url = 'postgresql://' + url[len('postgres://'):]
+        if url.startswith('postgresql+asyncpg://'):
+            url = 'postgresql://' + url[len('postgresql+asyncpg://'):]
+
+        async def _fix():
+            conn = await asyncpg.connect(dsn=url)
+            try:
+                row = await conn.fetchrow(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_name = 'lead_xref' AND column_name = 'close_lead_id'"
+                )
+                if not row:
+                    print('[startup] lead_xref.close_lead_id missing — adding column', flush=True)
+                    await conn.execute(
+                        "ALTER TABLE lead_xref ADD COLUMN close_lead_id VARCHAR(64)"
+                    )
+                    await conn.execute(
+                        "CREATE INDEX IF NOT EXISTS ix_lead_xref_close_lead_id ON lead_xref (close_lead_id)"
+                    )
+                    print('[startup] lead_xref.close_lead_id added OK', flush=True)
+                else:
+                    print('[startup] lead_xref.close_lead_id already exists', flush=True)
+            finally:
+                await conn.close()
+
+        asyncio.run(_fix())
+    except Exception as exc:
+        print(f'[startup] lead_xref schema fix warning (non-fatal): {exc}', flush=True)
+
 def main():
     db_url = os.environ.get("DATABASE_URL", "")
     if not db_url or "sqlite" in db_url:
@@ -113,6 +151,7 @@ def main():
     # Widen alembic_version.version_num if it's still VARCHAR(32).
     # Our revision IDs are descriptive names (up to ~50 chars) which exceed the default.
     _widen_alembic_version_column(db_url)
+    _fix_lead_xref_schema(db_url)
 
     rc = run(["python", "-m", "alembic", "upgrade", "head"])
     if rc != 0:
