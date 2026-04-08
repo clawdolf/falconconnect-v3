@@ -195,6 +195,20 @@ async def _create_close_lead(
     return None
 
 
+async def _add_close_note(lead_id: str, note: str) -> None:
+    """Add a text note to a Close lead."""
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                f"{CLOSE_API_BASE}/activity/note/",
+                json={"lead_id": lead_id, "note": note},
+                auth=_close_auth(),
+            )
+            resp.raise_for_status()
+    except Exception as exc:
+        logger.warning("Close note creation failed for %s: %s", lead_id, exc)
+
+
 async def _update_cadence_stage(lead_id: str, stage: str) -> bool:
     """Update the cadence_stage custom field on an existing Close lead.
 
@@ -370,6 +384,7 @@ async def ghl_rvm_complete(
             lead_id,
         )
         updated = await _update_cadence_stage(lead_id, "2. r1-calling")
+        await _add_close_note(lead_id, "RVM + SMS Drop Completed")
         await _log_sync(
             session,
             event_type="ghl.rvm_complete",
