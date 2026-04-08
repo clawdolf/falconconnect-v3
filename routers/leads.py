@@ -229,6 +229,23 @@ async def bulk_import_leads(
                 )
                 logger.warning("Bulk import — GHL upsert failed for %s (non-fatal): %s", lead_name, ghl_exc)
 
+            # ── STEP 3b: Write GHL contact ID back to Close lead custom field ──
+            if ghl_contact_id and close_lead_id:
+                try:
+                    import httpx as _httpx
+                    _auth = close._auth()
+                    async with _httpx.AsyncClient(timeout=15.0) as _c:
+                        await _c.put(
+                            f"https://api.close.com/api/v1/lead/{close_lead_id}/",
+                            json={"custom.cf_XWisbKrkWGeMvGYTMGMZVoWjYvFlcXmOkgILiXyDcMM": ghl_contact_id},
+                            auth=_auth,
+                        )
+                except Exception as ghl_field_exc:
+                    logger.warning(
+                        "Bulk import — GHL ID field update failed for %s (non-fatal): %s",
+                        lead_name, ghl_field_exc,
+                    )
+
             # ── STEP 4: Persist GHL↔Close cross-reference ──
             if ghl_contact_id:
                 try:
