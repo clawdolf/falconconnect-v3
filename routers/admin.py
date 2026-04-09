@@ -47,7 +47,7 @@ async def db_health(session: AsyncSession = Depends(get_session)):
         }
 
 
-@router.post("/rename-gcal-events", dependencies=[Depends(require_auth)])
+@router.post("/rename-gcal-events")
 async def rename_gcal_events():
     """One-shot: rename all GCal events starting with 'Call with ' to just the name."""
     from services.google_calendar import _get_calendar_service, update_appointment_event
