@@ -455,3 +455,247 @@ async def ghl_rvm_complete(
     )
 
     return {"status": "error", "reason": "lead creation failed"}
+
+
+# --- GHL Contact Declined Handler ---
+
+# Keywords that indicate a contact is declining further outreach
+DECLINE_KEYWORDS = [
+    "not interested",
+    "stop",
+    "don't want",
+    "do not want",
+    "no thanks",
+    "no thank you",
+    "unsubscribe",
+    "remove me",
+    "take me off",
+    "wrong number",
+    "leave me alone",
+]
+
+
+def _is_decline_response(message: str) -> bool:
+    """Check if an inbound SMS message is a decline/opt-out response.
+
+    Matches on common decline phrases. Case-insensitive.
+    Short messages (< 50 chars) are more likely to be direct responses.
+    """
+    if not message:
+        return False
+    msg_lower = message.lower().strip()
+    return any(kw in msg_lower for kw in DECLINE_KEYWORDS)
+
+
+async def _remove_contact_from_ghl_sequences(ghl_contact_id: str) -> bool:
+    """Remove a GHL contact from all active workflows/sequences.
+
+    Uses the GHL API to remove the contact from workflows,
+    which effectively stops any pending RVM, SMS, or call actions.
+    """
+    settings = get_settings()
+    if not settings.ghl_api_key or not ghl_contact_id:
+        return False
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            # Remove contact from all workflows
+            resp = await client.delete(
+                f"https://services.leadconnectorhq.com/contacts/{ghl_contact_id}/workflow/",
+                headers={
+                    "Authorization": f"Bearer {settings.ghl_api_key}",
+                    "Version": "2021-07-28",
+                },
+            )
+            if resp.status_code in (200, 204):
+                logger.info("Removed GHL contact %s from all workflows", ghl_contact_id)
+                return True
+            else:
+                logger.warning(
+                    "GHL workflow removal returned %s for contact %s: %s",
+                    resp.status_code, ghl_contact_id, resp.text[:300],
+                )
+    except Exception as exc:
+        logger.error("Failed to remove GHL contact %s from workflows: %s", ghl_contact_id, exc)
+
+    return False
+
+
+async def _tag_ghl_contact(ghl_contact_id: str, tag: str) -> bool:
+    """Add a tag to a GHL contact (e.g. 'Declined - Post RVM')."""
+    settings = get_settings()
+    if not settings.ghl_api_key or not ghl_contact_id:
+        return False
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                f"https://services.leadconnectorhq.com/contacts/{ghl_contact_id}/tags",
+                headers={
+                    "Authorization": f"Bearer {settings.ghl_api_key}",
+                    "Version": "2021-07-28",
+                    "Content-Type": "application/json",
+                },
+                json={"tags": [tag]},
+            )
+            if resp.status_code in (200, 201, 204):
+                logger.info("Tagged GHL contact %s with '%s'", ghl_contact_id, tag)
+                return True
+            else:
+                logger.warning(
+                    "GHL tag add returned %s for contact %s: %s",
+                    resp.status_code, ghl_contact_id, resp.text[:300],
+                )
+    except Exception as exc:
+        logger.error("Failed to tag GHL contact %s: %s", ghl_contact_id, exc)
+
+    return False
+
+
+@router.post("/contact-declined")
+async def ghl_contact_declined(
+    request: Request,
+    _secret: str = Depends(verify_webhook_secret),
+    session: AsyncSession = Depends(get_session),
+):
+    """Receive GHL webhook when a contact replies with a decline message.
+
+    Triggered by GHL workflow: Inbound SMS → keyword match → webhook.
+    Webhook URL: https://falconnect.org/api/ghl/contact-declined
+    Auth: X-GHL-Webhook-Secret header
+
+    Flow:
+    1. Extract contact ID and message from GHL payload
+    2. Verify the message is a decline (double-check keywords)
+    3. Look up Close lead via LeadXref → GHL ID → phone fallback
+    4. Update cadence_stage to "0. declined" in Close
+    5. Add a note to the Close lead with the decline message
+    6. Tag contact in GHL as "Declined - Post RVM"
+    7. Remove contact from all GHL workflows/sequences
+    8. Log to sync_log
+    """
+    raw_body = await request.json()
+
+    # Extract contact data
+    contact_data = _extract_ghl_contact_data(raw_body)
+    ghl_contact_id = contact_data["ghl_contact_id"]
+    phone = contact_data["phone"]
+    name = contact_data["name"]
+
+    # Extract the inbound message text from various payload shapes
+    message = (
+        raw_body.get("message", "")
+        or raw_body.get("text", "")
+        or raw_body.get("body", "")
+        or (raw_body.get("customData") or {}).get("message", "")
+        or (raw_body.get("customData") or {}).get("text", "")
+    )
+
+    logger.info(
+        "GHL contact-declined webhook: contact=%s name=%s phone=%s message=%r",
+        ghl_contact_id, name, phone, message,
+    )
+
+    if not ghl_contact_id:
+        logger.warning("No GHL contact ID in webhook payload — skipping")
+        await _log_sync(
+            session,
+            event_type="ghl.contact_declined",
+            status="skipped",
+            error_detail="no GHL contact ID in payload",
+            payload=raw_body,
+        )
+        return {"status": "skipped", "reason": "no contact ID"}
+
+    # Double-check the message is actually a decline
+    if message and not _is_decline_response(message):
+        logger.info(
+            "Message %r does not match decline keywords — skipping", message[:100]
+        )
+        await _log_sync(
+            session,
+            event_type="ghl.contact_declined",
+            source_id=ghl_contact_id,
+            status="skipped",
+            error_detail=f"message did not match decline keywords: {message[:200]}",
+            payload=raw_body,
+        )
+        return {"status": "skipped", "reason": "not a decline message"}
+
+    # Look up Close lead
+    existing_lead = None
+    if ghl_contact_id:
+        try:
+            xref_result = await session.execute(
+                select(LeadXref).where(LeadXref.ghl_contact_id == ghl_contact_id)
+            )
+            xref = xref_result.scalar_one_or_none()
+            if xref and xref.close_lead_id:
+                existing_lead = {"id": xref.close_lead_id}
+                logger.info(
+                    "LeadXref hit: GHL %s → Close %s", ghl_contact_id, xref.close_lead_id
+                )
+        except Exception as xref_exc:
+            logger.warning("LeadXref lookup failed for %s: %s", ghl_contact_id, xref_exc)
+
+    if not existing_lead:
+        existing_lead = await _search_close_by_ghl_id(ghl_contact_id)
+
+    if not existing_lead and phone:
+        existing_lead = await _search_close_by_phone(phone)
+
+    lead_id = existing_lead.get("id", "") if existing_lead else ""
+
+    # Update Close lead if found
+    if lead_id:
+        # Set cadence_stage to "0. declined"
+        stage_updated = await _update_cadence_stage(lead_id, "0. declined")
+
+        # Add decline note with the message text
+        note_text = f"Contact declined (SMS reply)"
+        if message:
+            note_text += f': "{message}"'
+        await _add_close_note(lead_id, note_text)
+
+        logger.info(
+            "Close lead %s marked as declined (stage=%s, note added)",
+            lead_id, "0. declined" if stage_updated else "update failed",
+        )
+    else:
+        logger.warning(
+            "No Close lead found for GHL contact %s — skipping Close update", ghl_contact_id
+        )
+
+    # Tag and remove from GHL sequences (do this even if Close update fails)
+    ghl_tagged = await _tag_ghl_contact(ghl_contact_id, "Declined - Post RVM")
+    ghl_removed = await _remove_contact_from_ghl_sequences(ghl_contact_id)
+
+    # Log the sync
+    await _log_sync(
+        session,
+        event_type="ghl.contact_declined",
+        source_id=ghl_contact_id,
+        target_id=lead_id,
+        status="ok" if (lead_id or ghl_tagged) else "partial",
+        error_detail=None if lead_id else "Close lead not found, GHL updated only",
+        payload=raw_body,
+    )
+
+    # Telegram alert for visibility
+    await send_telegram_alert(
+        f"<b>Contact Declined</b>\n"
+        f"Name: {name}\n"
+        f"Phone: {phone}\n"
+        f"Message: {message[:100] if message else '(not captured)'}\n"
+        f"Close Lead: {lead_id or 'not found'}\n"
+        f"GHL Tagged: {ghl_tagged}\n"
+        f"GHL Removed: {ghl_removed}",
+    )
+
+    return {
+        "status": "ok",
+        "lead_id": lead_id or None,
+        "close_updated": bool(lead_id),
+        "ghl_tagged": ghl_tagged,
+        "ghl_removed_from_sequences": ghl_removed,
+    }
