@@ -252,31 +252,78 @@ async def _process_appointment(
     """
     settings = get_settings()
 
-    # --- Skip drafts — Close fires 'created' on draft saves before publish ---
+    # --- Hard draft block: NEVER process draft webhooks ---
+    # Close auto-saves drafts constantly while the form is open. These fire
+    # both 'created' and 'updated' webhooks with status="draft". Any webhook
+    # with draft status must be dropped — SMS only fires on the published booking.
     activity_status = activity_data.get("status", "published")
-    # Only skip drafts on new bookings. Updates (e.g. timezone change) transiently
-    # set status=draft in the payload — skipping here would silently drop the reschedule.
-    if activity_status == "draft" and not is_update:
-        logger.info("Skipping draft activity for lead %s", lead_id)
+    if activity_status == "draft":
+        logger.info("Skipping draft webhook for lead %s (is_update=%s)", lead_id, is_update)
         return {"status": "skipped", "reason": "draft"}
 
-    # --- Idempotency guard: skip if we've already processed this activity ---
+    # --- Appointment status gate: only fire SMS on active statuses ---
+    # Even after publish, check the appointment-specific status field.
+    # SMS only fires for: Booked, Confirmed, Rescheduled.
+    # Cancelled / blank / other statuses are dropped here.
+    appointment_status = activity_data.get(f"custom.{CF_APPOINTMENT_STATUS}", "").strip()
+    ACTIVE_APPOINTMENT_STATUSES = {"Booked", "Confirmed", "Rescheduled"}
+    if appointment_status and appointment_status not in ACTIVE_APPOINTMENT_STATUSES:
+        logger.info(
+            "Skipping webhook — appointment status '%s' not in active set for lead %s",
+            appointment_status, lead_id,
+        )
+        return {"status": "skipped", "reason": f"inactive_status: {appointment_status}"}
+    if not appointment_status:
+        # Published activity with no appointment status set — skip to be safe
+        logger.info("Skipping webhook — no appointment status set on published activity for lead %s", lead_id)
+        return {"status": "skipped", "reason": "no_appointment_status"}
+
+    # --- Idempotency guard: skip true duplicates, allow rebookings through ---
+    # If we've already processed this activity_id, check if the incoming datetime
+    # matches what's stored. Same datetime = true duplicate, skip. Different datetime
+    # = rebooking from a corrected draft, let it through.
     activity_id = activity_data.get("id")
     if activity_id:
         async with _get_session_factory()() as session:
-            existing = await session.execute(
+            existing_result = await session.execute(
                 select(AppointmentReminder).where(
                     AppointmentReminder.activity_id == activity_id,
                     AppointmentReminder.status == "active",
                 )
             )
-            if existing.scalar_one_or_none() and not is_update:
-                logger.info(
-                    "Duplicate webhook — activity %s already processed for lead %s, skipping",
-                    activity_id,
-                    lead_id,
-                )
-                return {"status": "skipped", "reason": "duplicate_webhook", "activity_id": activity_id}
+            existing_reminder = existing_result.scalar_one_or_none()
+            if existing_reminder and not is_update:
+                # Check if incoming datetime differs from stored — indicates
+                # the draft was corrected before publishing
+                appointment_dt_str_for_check = activity_data.get(f"custom.{CF_APPOINTMENT_DATETIME}")
+                if appointment_dt_str_for_check:
+                    try:
+                        from datetime import timezone as _idt_tz
+                        _incoming = datetime.fromisoformat(appointment_dt_str_for_check.replace("Z", "+00:00") if "Z" in appointment_dt_str_for_check else appointment_dt_str_for_check)
+                        _stored = existing_reminder.appointment_datetime
+                        if _stored:
+                            _s = _stored.astimezone(_idt_tz.utc) if _stored.tzinfo else _stored.replace(tzinfo=_idt_tz.utc)
+                            _i = _incoming.astimezone(_idt_tz.utc) if _incoming.tzinfo else _incoming.replace(tzinfo=_idt_tz.utc)
+                            if abs((_i - _s).total_seconds()) >= 60:
+                                logger.info(
+                                    "Activity %s already processed but datetime changed (%s → %s) — "
+                                    "treating as rebooking for lead %s",
+                                    activity_id, _s.isoformat(), _i.isoformat(), lead_id,
+                                )
+                                # Fall through to process as rebooking
+                            else:
+                                logger.info(
+                                    "True duplicate — activity %s already processed with same datetime for lead %s",
+                                    activity_id, lead_id,
+                                )
+                                return {"status": "skipped", "reason": "duplicate_webhook", "activity_id": activity_id}
+                    except (ValueError, AttributeError):
+                        # Can't parse datetime — skip to be safe
+                        logger.warning("Could not parse datetime for idempotency check — skipping as duplicate")
+                        return {"status": "skipped", "reason": "duplicate_webhook", "activity_id": activity_id}
+                else:
+                    # No datetime in payload — skip as duplicate
+                    return {"status": "skipped", "reason": "duplicate_webhook", "activity_id": activity_id}
 
     # Close sends custom fields as flat "custom.cf_XXX" keys at the data level,
     # NOT as a nested "custom" dict. Extract them directly.
@@ -905,6 +952,22 @@ async def close_webhook(request: Request):
                 changed_fields,
             )
             # _process_appointment already handles rebooking (cancels old, creates new)
+            result = await _process_appointment(event_data, lead_id, is_update=True)
+            return result
+
+        # --- Draft-to-published transition: process regardless of changed_fields ---
+        # When Close transitions a draft to published, changed_fields often only
+        # contains ["status", "date_updated"] — the datetime is NOT listed even
+        # though it's the correct final value. Process it anyway.
+        # The appointment status gate above already verified the status is active.
+        activity_webhook_status = event_data.get("status", "published")
+        if activity_webhook_status in ("Booked", "published"):
+            logger.info(
+                "Draft-to-published transition detected for lead %s — "
+                "processing appointment with webhook data (changed_fields: %s)",
+                lead_id,
+                changed_fields,
+            )
             result = await _process_appointment(event_data, lead_id, is_update=True)
             return result
 
