@@ -312,12 +312,11 @@ async def create_lead(lead_dict: dict, enable_rvm: bool = True) -> dict:
     _set_cf("Tier", lead_dict.get("tier"))
     _set_cf("Vendor Lead ID", lead_dict.get("vendor_lead_id"))
 
-    # Loan Amount (text) — strip non-numeric chars, send as string
+    # Loan Amount (text) — format as $XXX,XXX
     loan_raw = lead_dict.get("loan_amount")
     if loan_raw:
-        loan_clean = re.sub(r"[^\d.]", "", str(loan_raw))
-        if loan_clean:
-            _set_cf("Loan Amount", loan_clean)
+        from utils.formatting import format_dollar_amount
+        _set_cf("Loan Amount", format_dollar_amount(loan_raw))
 
     # Lead Purchase Date (date) — from lpd only
     lpd_raw = lead_dict.get("lpd")
@@ -390,12 +389,12 @@ async def create_lead(lead_dict: dict, enable_rvm: bool = True) -> dict:
     if spouse_name:
         _set_cf("Spouse", "Yes")
 
-    # Spouse Age
+    # Spouse Age (text) — send as string
     if lead_dict.get("spouse_age") is not None:
         try:
-            _set_cf("Spouse Age", int(lead_dict["spouse_age"]))
+            _set_cf("Spouse Age", str(int(lead_dict["spouse_age"])))
         except (ValueError, TypeError):
-            pass
+            _set_cf("Spouse Age", str(lead_dict["spouse_age"]))
 
     # ── Build payload ──
     payload: Dict[str, Any] = {

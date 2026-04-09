@@ -199,7 +199,8 @@ async def upsert_contact(
     if lead.get("lender"):
         custom_fields.append({"id": GHL_CF_LENDER, "field_value": lead["lender"]})
     if lead.get("loan_amount"):
-        custom_fields.append({"id": GHL_CF_LOAN_AMOUNT, "field_value": str(lead["loan_amount"])})
+        from utils.formatting import format_dollar_amount
+        custom_fields.append({"id": GHL_CF_LOAN_AMOUNT, "field_value": format_dollar_amount(lead["loan_amount"])})
     if spouse_phone:
         custom_fields.append({"id": GHL_CF_SPOUSE_CELL, "field_value": spouse_phone})
     if home_phone:
