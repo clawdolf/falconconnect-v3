@@ -204,7 +204,6 @@ function LeadImport() {
     let totalLeads = 0
     for (let fi = 0; fi < fileQueue.length; fi++) { const fq = fileQueue[fi]; const map = getMapForFile(fi); totalLeads += buildLeads(fq.parsedRows, fq.headers, map, fq.vendor, fq.tier, fq.leadType, fq.leadAge, fq.purchaseDate, adjustAge).leads.length }
     setProgress({ current: 0, total: totalLeads, fileIndex: 0, fileName: fileQueue[0]?.name || '' })
-    const authHdrs = await getAuthHeaders()
     const BS = 10  // small batches = live progress bar updates
     let grandCreated = 0, grandFailed = 0, grandDropped = 0, processedLeads = 0
     const grandErrors = [], grandGhlWarnings = []
@@ -228,6 +227,8 @@ function LeadImport() {
           })
         }, 80)
         try {
+          // Refresh auth token before each batch — Clerk tokens expire ~60s
+          const authHdrs = await getAuthHeaders()
           const resp = await fetch('/api/leads/bulk', { method: 'POST', headers: authHdrs, body: JSON.stringify({ leads: batch, dry_run: dryRun, test_mode: testMode, enable_rvm: enableRvm }) })
           if (resp.ok) {
             const d = await resp.json(); fileCreated += (d.created || 0) + (d.updated || 0); fileFailed += d.failed || 0
