@@ -40,6 +40,7 @@ CLOSE_API_BASE = "https://api.close.com/api/v1"
 
 # Close custom field IDs
 CF_CADENCE_STAGE = "cf_vuP2rYRL0LA3OK0nCyZm9b19ki8ddokdTAapVnJ2Elb"
+CF_LENDER = "cf_SKsIYYQS3MoBBIxkVZKlUrxpvejOCqCIbiDBOePyJxI"
 
 # SMS templates — Variant A (Aggressive Blitz) — fallback defaults if DB empty
 SMS_TEMPLATES_DEFAULT = {
@@ -206,10 +207,15 @@ def _extract_lead_info(lead: dict) -> dict:
         parts = [p for p in [line1, line2] if p]
         address = ", ".join(parts)
 
+    # Lender from custom fields
+    custom = lead.get("custom", {})
+    lender = custom.get(CF_LENDER, "") or ""
+
     return {
         "first_name": first_name,
         "state": state,
         "address": address,
+        "lender": lender,
         "all_phones": all_phones,
     }
 
@@ -346,6 +352,7 @@ async def send_cadence_sms(
         first_name=info["first_name"],
         state=info["state"],
         address=info["address"],
+        lender=info["lender"],
     )
 
     # Calculate schedule time if not provided
