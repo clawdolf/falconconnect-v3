@@ -318,6 +318,8 @@ async def create_lead(lead_dict: dict, enable_rvm: bool = True) -> dict:
         from utils.formatting import format_dollar_amount
         _set_cf("Loan Amount", format_dollar_amount(loan_raw))
 
+    _set_cf("Home Value", lead_dict.get("home_value"))
+
     # Lead Purchase Date (date) — from lpd only
     lpd_raw = lead_dict.get("lpd")
     if lpd_raw:

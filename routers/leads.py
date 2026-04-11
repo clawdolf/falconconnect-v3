@@ -83,6 +83,7 @@ class BulkLeadItem(BaseModel):
     lead_age_bucket: Optional[str] = Field(None, max_length=32)
     lender: Optional[str] = Field(None, max_length=128)
     loan_amount: Optional[str] = Field(None, max_length=32)
+    home_value: Optional[str] = Field(None, max_length=64)
     home_phone: Optional[str] = Field(None, max_length=40)
     mobile_phone: Optional[str] = Field(None, max_length=40)
     spouse_phone: Optional[str] = Field(None, max_length=40)

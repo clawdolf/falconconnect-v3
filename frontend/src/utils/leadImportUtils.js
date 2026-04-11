@@ -21,6 +21,7 @@ export const VENDOR_TIERS = {
   'StrongPoint':    ['N/A'],
   'MilMo':          ['Gold', 'Silver', 'N/A'],
   'Cheryl':         ['T1', 'T2', 'T3', 'T4', 'T5'],
+  'Drippy':         ['N/A'],
 }
 
 export const NEEDS_LEAD_AGE = {
@@ -29,6 +30,7 @@ export const NEEDS_LEAD_AGE = {
   'Aria Leads': true,
   'MilMo': true,
   'Cheryl': false,
+  'Drippy': false,
 }
 
 export const VENDOR_AGE_BUCKETS = {
@@ -37,6 +39,7 @@ export const VENDOR_AGE_BUCKETS = {
   'Aria Leads':    ['1+ Mo', '2+ Mo', '3+ Mo', '9+ Mo', '2+ Yr'],
   'MilMo':         ['7-12M', '13-24M', '25-36M', '37-48M', '49-60M', '60+M'],
   'Cheryl':        [],
+  'Drippy':        [],
 }
 
 
@@ -93,6 +96,7 @@ export const LEAD_FIELDS = [
   // Financial
   { value: 'lender', label: 'Lender' },
   { value: 'loan_amount', label: 'Loan Amount' },
+  { value: 'home_value', label: 'Home Value' },
   { value: 'mail_date', label: 'Mortgage Sale Date' },
   { value: 'call_in_date', label: 'Call In Date (Mailer Response Date)' },
 
@@ -181,6 +185,8 @@ export const COLUMN_ALIASES = {
   'mtg': 'loan_amount', 'mortgageamount': 'loan_amount', 'mortageamount': 'loan_amount',
   'mortgage': 'loan_amount',
   'mtg amt': 'loan_amount', 'mtgamt': 'loan_amount',  // Cheryl vendor format
+  'mortgagebalance': 'loan_amount',
+  'estimatedhomevalue': 'home_value', 'home value': 'home_value', 'homevalue': 'home_value',
   'mail date': 'mail_date', 'mail_date': 'mail_date', 'maildate': 'mail_date',
   'closing date': 'mail_date', 'closingdate': 'mail_date',  // Cheryl vendor format
   'mortgage sale date': 'mail_date', 'mtg sale date': 'mail_date',
