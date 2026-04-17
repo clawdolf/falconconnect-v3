@@ -183,7 +183,7 @@ export const COLUMN_ALIASES = {
   'lender': 'lender', 'mortgage company': 'lender', 'bank': 'lender', 'servicer': 'lender',
   'loan amount': 'loan_amount', 'loan_amount': 'loan_amount', 'loanamount': 'loan_amount',
   'mtg': 'loan_amount', 'mortgageamount': 'loan_amount', 'mortageamount': 'loan_amount',
-  'mortgage': 'loan_amount',
+  'mortgage': 'loan_amount', 'mortgage_amount': 'loan_amount', 'mortage_amount': 'loan_amount',
   'mtg amt': 'loan_amount', 'mtgamt': 'loan_amount',  // Cheryl vendor format
   'mortgagebalance': 'loan_amount',
   'estimatedhomevalue': 'home_value', 'home value': 'home_value', 'homevalue': 'home_value',
