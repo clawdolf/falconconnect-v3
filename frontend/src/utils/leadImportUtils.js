@@ -562,9 +562,10 @@ export function buildLeads(rows, headers, columnMap, vendor, tier, leadType, lea
     // Vendor Lead ID: force to string (may come as large integer from CSV)
     if (lead.vendor_lead_id) lead.vendor_lead_id = String(lead.vendor_lead_id)
 
-    // Spouse Age: cast to int, drop if invalid/zero
+    // Spouse Age: cast to int, drop if invalid/zero. Tolerates prefixed values like "Age: 62".
     if (lead.spouse_age) {
-      const sa = parseInt(lead.spouse_age, 10)
+      const saMatch = String(lead.spouse_age).match(/\d+/)
+      const sa = saMatch ? parseInt(saMatch[0], 10) : NaN
       if (isNaN(sa) || sa === 0) { delete lead.spouse_age } else { lead.spouse_age = sa }
     }
 
@@ -625,9 +626,10 @@ export function buildLeads(rows, headers, columnMap, vendor, tier, leadType, lea
       }
     }
 
-    // age → birth_year (only if no DOB already set)
+    // age → birth_year (only if no DOB already set). Tolerates prefixed values like "Age: 65".
     if (lead.age && !lead.dob) {
-      const a = parseInt(lead.age, 10)
+      const ageMatch = String(lead.age).match(/\d+/)
+      const a = ageMatch ? parseInt(ageMatch[0], 10) : NaN
       if (!isNaN(a)) {
         if (a >= 1900 && a <= new Date().getFullYear()) {
           // looks like a birth year (e.g. 1965) — use directly
