@@ -15,7 +15,7 @@
 // ═══════════════════════════════════════════════
 
 export const VENDOR_TIERS = {
-  'HOFLeads':       ['Diamond', 'Gold', 'Silver'],
+  'HOFLeads':       ['Platinum', 'Diamond', 'Diamond Replay'],
   'Anne Proven Leads':   ['N/A'],
   'Aria Leads':     ['Gold', 'Silver', 'N/A'],
   'StrongPoint':    ['N/A'],
@@ -337,8 +337,6 @@ export function autoDetectVendor(filename) {
   const out = { vendor: 'HOFLeads', tier: 'Diamond', leadType: 'Mortgage Protection', leadAge: '' }
   if (fn.includes('hof')) {
     out.vendor = 'HOFLeads'
-    if (fn.includes('gold') || fn.includes('t2')) out.tier = 'Gold'
-    else if (fn.includes('silver') || fn.includes('t3')) out.tier = 'Silver'
   } else if (fn.includes('proven')) { out.vendor = 'Anne Proven Leads'; out.tier = 'N/A' }
   else if (fn.includes('aria')) { out.vendor = 'Aria Leads'; out.tier = 'Gold' }
   else if (fn.includes('milmo')) { out.vendor = 'MilMo'; out.tier = 'Gold' }
@@ -579,13 +577,9 @@ export function buildLeads(rows, headers, columnMap, vendor, tier, leadType, lea
     } else {
       if (tier && !lead.tier) lead.tier = tier
     }
-    // Build lead_source — Cheryl is always flat "Cheryl", no tier appended
+    // Build lead_source — vendor name only. Tier is a separate field.
     if (vendor && !lead.lead_source) {
-      if (vendor === 'Cheryl') {
-        lead.lead_source = 'Cheryl'
-      } else {
-        lead.lead_source = vendor + (lead.tier && lead.tier !== 'N/A' ? ' / ' + lead.tier : '')
-      }
+      lead.lead_source = vendor
     }
     if (purchaseDate && !lead.lpd) lead.lpd = purchaseDate
 
