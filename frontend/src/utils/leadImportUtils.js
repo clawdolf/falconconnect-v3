@@ -426,6 +426,24 @@ const DATE_FIELDS = ['dob', 'mail_date', 'lpd', 'lead_received', 'spouse_dob', '
  *   Dale Mackenstadt:  2025-11-05 → T1
  *   Charles Saksa:     2025-11-07 → T1
  */
+/**
+ * Parse HOFLeads "Campaign Number" column.
+ * Format: "<Tier> <Date>", e.g. "Diamond 3/15/2026", "Diamond Replay 3/15/2026", "Platinum 3/15/2026".
+ * Returns { tier, date } — either may be null if not present/parseable.
+ */
+function parseHofCampaign(raw) {
+  const s = String(raw || '').trim()
+  if (!s) return { tier: null, date: null }
+  const lower = s.toLowerCase()
+  let tier = null
+  if (lower.includes('diamond replay')) tier = 'Diamond Replay'
+  else if (lower.includes('platinum')) tier = 'Platinum'
+  else if (lower.includes('diamond')) tier = 'Diamond'
+  const dateMatch = s.match(/\d{1,2}\/\d{1,2}\/\d{2,4}|\d{4}-\d{2}-\d{2}/)
+  const date = dateMatch ? normalizeDateValue(dateMatch[0]) : null
+  return { tier, date }
+}
+
 function getCherylTier(dateStr) {
   if (!dateStr) return null
   const d = new Date(dateStr + 'T00:00:00')  // force local midnight parse
@@ -460,6 +478,11 @@ export function buildLeads(rows, headers, columnMap, vendor, tier, leadType, lea
   const leads = []
   let droppedCount = 0
   const droppedRows = []
+  // HOFLeads: per-row tier + purchase date live in a "Campaign Number" column.
+  // e.g. "Diamond 3/15/2026" → tier=Diamond, date=2026-03-15.
+  const hofCampaignIdx = vendor === 'HOFLeads'
+    ? headers.findIndex(h => String(h || '').trim().toLowerCase() === 'campaign number')
+    : -1
   for (const row of rows) {
     const lead = {}
     headers.forEach((h, i) => {
@@ -560,6 +583,17 @@ export function buildLeads(rows, headers, columnMap, vendor, tier, leadType, lea
         const looksLikeTier = /^(gold|silver|n\/a|bronze|platinum)$/i.test(ltVal)
         if (looksLikeTier && !lead.tier) lead.tier = ltVal
         delete lead.lead_type
+      }
+    }
+
+    // HOFLeads: parse per-row tier + purchase date from "Campaign Number" column.
+    // Row value wins over batch metadata (runs before batch fallbacks below).
+    if (hofCampaignIdx !== -1) {
+      const { tier: rowTier, date: rowDate } = parseHofCampaign(row[hofCampaignIdx])
+      if (rowTier && !lead.tier) lead.tier = rowTier
+      if (rowDate) {
+        if (!lead.mail_date) lead.mail_date = rowDate
+        if (!lead.lpd) lead.lpd = rowDate
       }
     }
 
