@@ -1,7 +1,9 @@
-"""Public ad lead capture — receives form submissions from Meta/Google ad landing pages.
+"""Public ad lead capture — receives form submissions from Meta / Google / TikTok
+ad landing pages and writes them into Close.com with full attribution and a
+TCPA-compliant consent audit trail.
 
-Creates leads directly in Close.com with full UTM attribution.
-No auth required — this endpoint is hit by public landing page forms.
+Public endpoint — no Clerk auth. Bot protection: Cloudflare Turnstile +
+hidden honeypot + slowapi rate limit.
 """
 
 import logging
@@ -23,7 +25,7 @@ router = APIRouter()
 
 
 class AdLeadPayload(BaseModel):
-    """Payload for POST /api/public/leads/capture/ad — ad landing page form submission."""
+    """Payload for POST /api/public/leads/capture/ad."""
 
     first_name: str = Field(..., min_length=1, max_length=128)
     last_name: str = Field(..., min_length=1, max_length=128)
@@ -31,8 +33,10 @@ class AdLeadPayload(BaseModel):
     phone: str = Field(..., min_length=7, max_length=40)
     state: Optional[str] = Field(None, max_length=64)
     age: Optional[int] = Field(None, ge=18, le=120)
-    is_homeowner: Optional[bool] = None
     coverage_interest: Optional[str] = Field(None, max_length=64)
+
+    # TCPA / A2P SMS consent — single combined opt-in. Must be true to submit.
+    sms_consent: bool = False
 
     # UTM attribution (all optional — form may not capture all)
     utm_source: Optional[str] = Field(None, max_length=128)
@@ -41,6 +45,14 @@ class AdLeadPayload(BaseModel):
     utm_content: Optional[str] = Field(None, max_length=256)
     ad_platform: Optional[str] = Field(None, max_length=64)
     lead_form_variant: Optional[str] = Field(None, max_length=128)
+
+    # Per-click attribution IDs — from the ad networks
+    fbclid: Optional[str] = Field(None, max_length=512)
+    gclid: Optional[str] = Field(None, max_length=512)
+    ttclid: Optional[str] = Field(None, max_length=512)
+
+    # Full landing page URL at the moment of submission
+    landing_page_url: Optional[str] = Field(None, max_length=2048)
 
     # Bot protection
     turnstile_token: Optional[str] = Field(None, max_length=4096)
@@ -53,6 +65,7 @@ class AdLeadResponse(BaseModel):
 
     success: bool
     lead_id: str
+    duplicate: bool = False
 
 
 # ── Endpoint ──
@@ -68,15 +81,22 @@ async def capture_ad_lead(request: Request, payload: AdLeadPayload):
     """Capture a lead from an ad landing page — writes to Close.com.
 
     Public endpoint (no auth). Called by falconfinancial.org landing page forms.
-    Bot protection: Cloudflare Turnstile + hidden honeypot + rate limit.
     """
     client_ip = request.headers.get("CF-Connecting-IP") or (
         request.headers.get("X-Forwarded-For", "").split(",")[0].strip() or None
     )
+
     if not await verify_turnstile(payload.turnstile_token, client_ip):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Bot verification failed.",
+        )
+
+    # Enforce TCPA opt-in at the API edge too, not just in the UI.
+    if not payload.sms_consent:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Consent is required to submit this form.",
         )
 
     try:
@@ -87,7 +107,6 @@ async def capture_ad_lead(request: Request, payload: AdLeadPayload):
             phone=payload.phone,
             state=payload.state,
             age=payload.age,
-            is_homeowner=payload.is_homeowner,
             coverage_interest=payload.coverage_interest,
             utm_source=payload.utm_source,
             utm_medium=payload.utm_medium,
@@ -95,20 +114,29 @@ async def capture_ad_lead(request: Request, payload: AdLeadPayload):
             utm_content=payload.utm_content,
             ad_platform=payload.ad_platform,
             lead_form_variant=payload.lead_form_variant,
+            sms_consent=payload.sms_consent,
+            consent_ip=client_ip,
+            fbclid=payload.fbclid,
+            gclid=payload.gclid,
+            ttclid=payload.ttclid,
+            landing_page_url=payload.landing_page_url,
         )
 
         logger.info(
-            "Ad lead captured: %s %s → Close:%s (source=%s, campaign=%s)",
+            "Ad lead %s: %s %s → Close:%s (source=%s, campaign=%s, variant=%s)",
+            "deduped" if result.get("duplicate") else "captured",
             payload.first_name,
             payload.last_name,
             result["lead_id"],
             payload.utm_source or "unknown",
             payload.utm_campaign or "unknown",
+            payload.lead_form_variant or "unknown",
         )
 
         return AdLeadResponse(
             success=True,
             lead_id=result["lead_id"],
+            duplicate=bool(result.get("duplicate")),
         )
 
     except Exception as exc:
