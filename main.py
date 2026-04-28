@@ -432,6 +432,23 @@ async def lifespan(app: FastAPI):
         logger.critical(_msg)
         raise RuntimeError(_msg)
 
+    # Hard guard: refuse to boot in production without Turnstile configured.
+    # The public ad-lead endpoints fall back to honeypot+rate-limit only when
+    # TURNSTILE_SECRET is empty — that's acceptable in dev, never in prod.
+    _is_prod = (
+        os.environ.get("RENDER", "").lower() == "true"
+        or os.environ.get("ENVIRONMENT", "").lower() == "production"
+    )
+    _turnstile_secret = os.environ.get("TURNSTILE_SECRET", "")
+    if _is_prod and not _turnstile_secret:
+        _msg = (
+            "FATAL STARTUP: TURNSTILE_SECRET is missing in production. "
+            "Public ad-lead endpoints would accept bot traffic with only "
+            "honeypot+rate-limit protection. Set TURNSTILE_SECRET in Render."
+        )
+        logger.critical(_msg)
+        raise RuntimeError(_msg)
+
     # Validate critical env vars before anything else
     _validate_critical_env()
 

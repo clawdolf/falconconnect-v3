@@ -1,0 +1,16 @@
+title = "falconnect gitleaks config"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "NIPR public license verification token (DetailToken URL param, not a secret)"
+regexes = [
+    '''DetailToken=[0-9A-F]{64}''',
+]
+
+[[allowlists]]
+description = "Clerk publishable keys are public by design (ship in frontend bundle)"
+regexes = [
+    '''pk_(test|live)_[A-Za-z0-9]+''',
+]

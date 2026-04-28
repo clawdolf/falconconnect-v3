@@ -65,9 +65,6 @@ class Settings(BaseSettings):
     twilio_auth_token: str = ""
     twilio_from_number: str = "+18446813690"
 
-    # --- Quo (OpenPhone) ---
-    quo_api_key: str = ""
-
     # --- Cloudflare Turnstile (bot protection on public lead forms) ---
     # If empty, verification is skipped (rollout coordination mode).
     # Set both TURNSTILE_SECRET here and VITE_TURNSTILE_SITEKEY on

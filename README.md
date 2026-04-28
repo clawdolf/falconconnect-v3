@@ -65,7 +65,7 @@ alembic upgrade head
 | `NOTION_TOKEN` | Notion integration token |
 | `NOTION_LEADS_DB_ID` | Notion leads database ID |
 | `CALENDAR_SECRET` | Secret token for iCal feed URLs |
-| `QUO_API_KEY` | Quo (OpenPhone) API key |
+| `TURNSTILE_SECRET` | Cloudflare Turnstile server-side secret. **Required in production** — startup will fail-closed if missing when `ENVIRONMENT=production` or `RENDER=true`. |
 
 ### Google Calendar (Service Account)
 
@@ -142,10 +142,13 @@ see `utils/rate_limit.py` for the key function (prefers `CF-Connecting-IP`).
 ### Bot protection
 
 Public ad landing pages run Cloudflare Turnstile. The backend verifies tokens
-server-side; if `TURNSTILE_SECRET` is unset, verification is skipped (rollout
-coordination mode). **Deploy order**: set `VITE_TURNSTILE_SITEKEY` on
-Cloudflare Pages first, then `TURNSTILE_SECRET` on Render — reversing this
-order will reject legitimate form submissions.
+server-side. **Production fails closed** — startup aborts if `TURNSTILE_SECRET`
+is missing while `ENVIRONMENT=production` (or `RENDER=true`). In dev, an empty
+secret pass-throughs and the honeypot + rate-limit are the only defence.
+
+**Deploy order**: set `VITE_TURNSTILE_SITEKEY` on falconverify (Render Static
+Site) first, then `TURNSTILE_SECRET` on this backend — reversing it rejects
+legitimate form submissions during the gap.
 
 ### Observability
 
@@ -183,6 +186,23 @@ launchctl load ~/Library/LaunchAgents/com.falcon.trigger-poller.plist
 
 `/docs`, `/redoc`, and `/openapi.json` return 404 in production
 (`RENDER=true` or `ENVIRONMENT=production`). Locally they are reachable.
+
+### Secrets discipline
+
+Real secrets live in Render env vars. `.env` is gitignored; only
+`.env.example` is committed. A `gitleaks` pre-commit hook (`pip install
+pre-commit && pre-commit install`) blocks any commit that contains an API
+token, and the same scan runs as a required GitHub Actions check on every
+push and PR (`.github/workflows/gitleaks.yml`).
+
+If the hook fires, **do not bypass with `--no-verify`**. Rotate the
+exposed key in its provider dashboard, update the Render env var, then
+remove the secret from your working copy and commit. False positives that
+keep recurring belong in `.gitleaks.toml` allowlist (NIPR `DetailToken`
+URL params and Clerk publishable keys are already allowlisted).
+
+Rotate quarterly: `CLOSE_API_KEY`, `GHL_API_KEY`, `NOTION_TOKEN`,
+`TWILIO_AUTH_TOKEN`, plus webhook signing secrets above.
 
 ---
 

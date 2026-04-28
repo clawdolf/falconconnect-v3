@@ -8,10 +8,11 @@ __pycache__/
 build/
 .eggs/
 
-# Env
+# Env (secrets stay local, only .env.example is committed)
 .env
-.env.local
+.env.*
 *.env
+!.env.example
 
 # DB
 *.db
