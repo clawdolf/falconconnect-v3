@@ -67,6 +67,10 @@ CLOSE_API_BASE = "https://api.close.com/api/v1"
 # Custom field ID for Appointment Length (choices: "15 min", "30 min", "60 min")
 CF_APPOINTMENT_LENGTH = "cf_BdxJMNDwJW0w9LeDm5mC3m6K7lPdu4XBtgaYEdiB433"
 
+# Custom field ID for Notify toggle (choices: "Yes", "No"; blank/missing = default Yes)
+# Run scripts/fetch_appointment_field_ids.py to discover the ID after adding the field in Close.
+CF_APPOINTMENT_NOTIFY = "cf_fcR87MwVB1JJaHqYrCozh8DhzSHS29u75yOB9Hf5bF5"
+
 # Map appointment length choice to minutes
 DURATION_MAP: dict[str | None, int] = {
     "15 min": 15,
@@ -486,9 +490,13 @@ async def _process_appointment(
         if existing_reminders:
             await session.commit()
 
+    # --- Notify toggle: blank/"Yes" => send SMS; "No" => skip SMS, keep calendar ---
+    notify_choice = activity_data.get(f"custom.{CF_APPOINTMENT_NOTIFY}", "").strip()
+    should_notify = notify_choice != "No"
+
     # --- Step 1: Send SMS (confirmation + schedule reminders) ---
     sms_results: dict = {"confirmation": None, "reminder_24hr": None, "reminder_1hr": None}
-    if phone:
+    if phone and should_notify:
         sms_results = await schedule_appointment_sms(
             lead_id=lead_id,
             contact_id=contact_id,
@@ -498,6 +506,11 @@ async def _process_appointment(
             tz_choice=tz_choice,
             address=address,
         ) or sms_results  # fallback if schedule_appointment_sms returns None
+    elif phone:
+        logger.info(
+            "notify=No on appointment for lead %s — skipping SMS, calendar still synced",
+            lead_id,
+        )
 
     # --- Step 2: Set up dummy email + GCal event ---
     dummy_email = f"lead-{lead_id}@{settings.calendar_email_domain}"
