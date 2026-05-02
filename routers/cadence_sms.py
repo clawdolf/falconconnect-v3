@@ -22,13 +22,18 @@ import hashlib
 import hmac
 import json
 import logging
+from datetime import datetime, timezone as dt_tz
 from typing import Optional
 
 import httpx
-from fastapi import APIRouter, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import get_settings
+from db.database import get_session
+from db.models import CadenceSmsDispatch
 from services.telegram_alerts import send_telegram_alert
 from services.sms_routing import resolve_sms_from_number
 
@@ -419,6 +424,7 @@ async def close_send_sms(
     request: Request,
     template: str = Query(..., description="SMS template: sms1|sms2|sms3|sms4|r1_done|r2_done|r3_done"),
     next_stage: str = Query(..., description="Cadence stage to set after SMS"),
+    session: AsyncSession = Depends(get_session),
 ):
     """Receive webhook from Close workflow and send cadence SMS.
 
@@ -481,6 +487,39 @@ async def close_send_sms(
         lead_id, template, next_stage,
     )
 
-    # Send SMS and update stage
+    # Idempotency: insert-first dedup keyed on (lead_id, template, UTC date).
+    # Close webhooks deliver at-least-once; without this, retries duplicate SMS.
+    today_utc = datetime.now(dt_tz.utc).date().isoformat()
+    dedup_key = f"{lead_id}:{template}:{today_utc}"
+    dispatch = CadenceSmsDispatch(
+        dedup_key=dedup_key,
+        lead_id=lead_id,
+        template_key=template,
+        scheduled_date=today_utc,
+    )
+    session.add(dispatch)
+    try:
+        await session.commit()
+    except IntegrityError:
+        await session.rollback()
+        logger.info(
+            "Duplicate cadence SMS suppressed: lead=%s template=%s date=%s",
+            lead_id, template, today_utc,
+        )
+        return {
+            "status": "duplicate_suppressed",
+            "lead_id": lead_id,
+            "template": template,
+            "dedup_key": dedup_key,
+        }
+
+    # We own the lock — proceed with the actual send
     result = await send_cadence_sms(lead_id, template, next_stage)
+
+    # Stamp the SMS IDs onto the dispatch row for audit
+    sent_ids = result.get("sms_ids") or []
+    if sent_ids:
+        dispatch.sms_ids = ",".join(sent_ids)
+        await session.commit()
+
     return result

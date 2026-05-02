@@ -4,6 +4,10 @@
 **Date:** 2026-03-11  
 **Build Hash:** `index-CrWsymvP.js` / `index-eZbJcYdB.css`
 
+> **Note (2026-04-26):** Quo/OpenPhone has been removed from the import
+> pipeline. The Quo-related rows below (`sync_contact()`, `quo_synced` counter,
+> Quo rate limiting, Quo field parity) are historical and no longer apply.
+
 ---
 
 ## Summary: BLOCKED

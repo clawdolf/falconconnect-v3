@@ -169,6 +169,27 @@ class AppointmentReminder(Base):
     )
 
 
+class CadenceSmsDispatch(Base):
+    """Idempotency log for cadence SMS sends.
+
+    Insert-first dedup: every webhook-triggered cadence SMS attempts to
+    insert a row keyed on (lead_id + template + UTC date). The unique
+    constraint on `dedup_key` makes Close webhook retries no-ops within
+    the same UTC day. If a lead genuinely needs the same template again,
+    it will fire on the next UTC day.
+    """
+
+    __tablename__ = "cadence_sms_dispatches"
+
+    id: int = Column(Integer, primary_key=True, autoincrement=True)
+    dedup_key: str = Column(String(256), unique=True, nullable=False, index=True)
+    lead_id: str = Column(String(128), nullable=False, index=True)
+    template_key: str = Column(String(64), nullable=False)
+    scheduled_date: str = Column(String(32), nullable=False)
+    sms_ids: str = Column(Text, nullable=True)
+    created_at: datetime = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class AppointmentCalendarEmail(Base):
     """Maps Close leads to dummy calendar emails for GCal ↔ Close linking."""
 

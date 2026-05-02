@@ -18,7 +18,7 @@ from db.models import ConferenceSession
 from middleware.auth import require_auth
 from services import conference as conf_service
 from services import twilio_client
-from utils.rate_limit import limiter
+from utils.rate_limit import limiter, user_or_ip_key
 
 
 async def _assert_conf_ownership(
@@ -95,13 +95,18 @@ async def list_sessions(
 
 
 @router.post("/conference/start")
+@limiter.limit("10/hour;50/day", key_func=user_or_ip_key)
 async def start_conference(
     req: StartConferenceRequest,
     request: Request,
     session: AsyncSession = Depends(get_session),
     user=Depends(require_auth),
 ):
-    """Start a 3-way conference bridge. Dials Seb first, then Lead."""
+    """Start a 3-way conference bridge. Dials Seb first, then Lead.
+
+    Per-user quota: 10/hour, 50/day. Twilio bills per-minute for outbound
+    PSTN; this caps the bleed if a single account is compromised.
+    """
     base_url = _get_public_url(request)
 
     try:
@@ -257,13 +262,16 @@ async def end_conference(
 
 
 @router.post("/conference/caller-id/verify")
+@limiter.limit("5/hour;20/day", key_func=user_or_ip_key)
 async def verify_caller_id(
     req: CallerIdVerifyRequest,
+    request: Request,
     user=Depends(require_auth),
 ):
     """Initiate caller ID verification for a phone number.
 
-    Twilio will call the number and play a 6-digit code.
+    Twilio will call the number and play a 6-digit code. Per-user quota:
+    5/hour, 20/day. Each call is billed at Twilio voice rates.
     """
     try:
         result = await twilio_client.initiate_caller_id_verification(req.phone_number)

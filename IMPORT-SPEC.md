@@ -5,6 +5,12 @@
 **Status:** Ready for Builder  
 **Scope:** Complete rewrite of `LeadImport.jsx` + supporting utils. Backend changes minimal (endpoint already correct).
 
+> **Deprecated section: Quo / OpenPhone (2026-04-26).** This spec describes a
+> three-leg import pipeline (Notion → GHL → Quo). The Quo leg has been
+> removed — `services/quo.py` is gone, `quo_synced` counters are no longer
+> emitted, and the live pipeline is **Notion → GHL only**. Treat all Quo
+> references below as historical context, not current behaviour.
+
 ---
 
 ## Table of Contents
