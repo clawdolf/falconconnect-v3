@@ -1,0 +1,224 @@
+"""Tests for the background job registry + admin endpoints.
+
+The job registry is in-process and runs the audit on asyncio. Tests use
+fixture mode (no network) and a tmp directory for the reports base so they
+never touch /tmp/falconconnect/...
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+from pathlib import Path
+
+import pytest
+from pydantic import ValidationError
+
+from routers.lead_hygiene import StartJobRequest, _resolve_upload_path
+from services import lead_hygiene_jobs as jobs
+
+
+@pytest.fixture(autouse=True)
+def _isolate_reports_base(tmp_path: Path, monkeypatch):
+    """Point both the registry and the router at a per-test reports base."""
+    base = tmp_path / "reports"
+    base.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(jobs, "REPORTS_BASE", base)
+    # The router imports REPORTS_BASE by symbol — patch its DEFAULT_REPORTS_BASE
+    # so the upload endpoint sandbox matches.
+    from routers import lead_hygiene as router_mod
+    monkeypatch.setattr(router_mod, "DEFAULT_REPORTS_BASE", base)
+    monkeypatch.setattr(router_mod, "NOTION_UPLOAD_DIR", base / "_uploads")
+    jobs._reset_registry_for_tests()
+    yield
+
+
+# ─── Request validators ──────────────────────────────────────────────
+
+
+class TestStartJobRequestValidation:
+    def test_defaults(self):
+        req = StartJobRequest()
+        assert req.limit == 200
+        assert req.status_label == "Voicemail"
+        assert req.include_ghl is True
+        assert req.notion_upload_token is None
+
+    def test_empty_status_label_normalises_to_none(self):
+        req = StartJobRequest(status_label="")
+        assert req.status_label is None
+
+    def test_status_label_rejects_punctuation(self):
+        with pytest.raises(ValidationError):
+            StartJobRequest(status_label="Voicemail; DROP TABLE")
+        with pytest.raises(ValidationError):
+            StartJobRequest(status_label="../etc")
+
+    def test_status_label_accepts_typical_values(self):
+        for v in ("Voicemail", "Re-Engage", "Not Interested", "All"):
+            req = StartJobRequest(status_label=v)
+            assert req.status_label == v
+
+    def test_status_label_overlong_rejected(self):
+        with pytest.raises(ValidationError):
+            StartJobRequest(status_label="a" * 100)
+
+    def test_limit_bounds(self):
+        with pytest.raises(ValidationError):
+            StartJobRequest(limit=0)
+        with pytest.raises(ValidationError):
+            StartJobRequest(limit=100_000)
+        StartJobRequest(limit=7500)  # explicit "full audit" path
+
+    def test_upload_token_must_be_hex(self):
+        with pytest.raises(ValidationError):
+            StartJobRequest(notion_upload_token="not-a-hex-token")
+        with pytest.raises(ValidationError):
+            StartJobRequest(notion_upload_token="../escape")
+        StartJobRequest(notion_upload_token="a" * 32)
+
+    def test_legacy_request_rejects_raw_notion_path(self):
+        from routers.lead_hygiene import AuditRequest
+        with pytest.raises(ValidationError):
+            AuditRequest(notion_csv_path="/tmp/secret/archive.csv")
+
+    def test_extra_query_is_bounded(self):
+        StartJobRequest(extra_query='created < "2024-01-01"')
+        with pytest.raises(ValidationError):
+            StartJobRequest(extra_query="a" * 201)
+        with pytest.raises(ValidationError):
+            StartJobRequest(extra_query="status:Voicemail; rm -rf /")
+
+
+# ─── Report download path safety ────────────────────────────────────
+
+
+class TestResolveReportPath:
+    def test_invalid_job_id_rejected(self):
+        with pytest.raises(ValueError):
+            jobs.resolve_report_path("not-a-uuid", "csv")
+        with pytest.raises(ValueError):
+            jobs.resolve_report_path("../../etc/passwd", "csv")
+        with pytest.raises(ValueError):
+            jobs.resolve_report_path("a" * 31, "csv")  # one too short
+
+    def test_unknown_kind_rejected(self):
+        valid_id = "a" * 32
+        with pytest.raises(ValueError):
+            jobs.resolve_report_path(valid_id, "exe")
+        with pytest.raises(ValueError):
+            jobs.resolve_report_path(valid_id, "../etc/passwd")
+
+    def test_missing_run_raises_not_found(self):
+        valid_id = "b" * 32
+        with pytest.raises(FileNotFoundError):
+            jobs.resolve_report_path(valid_id, "csv")
+
+
+# ─── End-to-end fixture run via the job registry ─────────────────────
+
+
+def _run_to_completion(params: jobs.JobParams) -> jobs.JobRecord:
+    """Schedule a job and await its completion in a fresh event loop."""
+    async def _go() -> jobs.JobRecord:
+        rec = await jobs.start_job(params)
+        # _TASKS is populated synchronously by start_job
+        await asyncio.wait_for(jobs._TASKS[rec.job_id], timeout=30)
+        return rec
+    return asyncio.run(_go())
+
+
+class TestFixtureBackgroundRun:
+    def test_full_lifecycle_fixture(self):
+        rec = _run_to_completion(jobs.JobParams(fixture_mode=True, limit=11))
+        assert rec.status == "completed"
+        assert rec.phase == "done"
+        assert rec.error is None
+        assert rec.summary is not None
+        assert rec.summary["total"] == 11
+        assert Path(rec.csv_path).is_file()
+        assert Path(rec.json_path).is_file()
+        # meta.json was written so the run survives a restart
+        assert Path(rec.meta_path).is_file()
+
+    def test_list_runs_includes_completed(self):
+        rec = _run_to_completion(jobs.JobParams(fixture_mode=True))
+        runs = jobs.list_runs()
+        assert any(r["job_id"] == rec.job_id for r in runs)
+
+    def test_public_record_does_not_leak_upload_path(self):
+        params = jobs.JobParams(fixture_mode=True, notion_csv_path="/tmp/secret/archive.csv")
+        rec = _run_to_completion(params)
+        public = rec.to_public()
+        assert public["params"]["notion_csv_path"] is True
+        assert "/tmp/secret" not in json.dumps(public)
+
+    def test_get_run_after_registry_reset_reads_meta(self):
+        rec = _run_to_completion(jobs.JobParams(fixture_mode=True))
+        jobs._reset_registry_for_tests()
+        # In-memory registry is gone; on-disk meta.json should still work.
+        reloaded = jobs.get_run(rec.job_id)
+        assert reloaded is not None
+        assert reloaded.status == "completed"
+        assert reloaded.summary is not None
+
+    def test_preview_returns_projection_only(self):
+        rec = _run_to_completion(jobs.JobParams(fixture_mode=True))
+        preview = jobs.load_report_preview(rec.job_id, limit=5)
+        assert preview["total_rows"] == 11
+        assert len(preview["rows"]) == 5
+        for row in preview["rows"]:
+            # Only the projection fields land in preview rows.
+            assert set(row.keys()) >= {
+                "lead_name", "phone", "close_lead_id", "recommended_bucket",
+                "risk_flags", "reason", "confidence",
+            }
+            # Heavy raw fields are stripped.
+            assert "activity_summary" not in row
+            assert "recommended_close_update" not in row
+
+    def test_download_paths_resolve_after_run(self):
+        rec = _run_to_completion(jobs.JobParams(fixture_mode=True))
+        csv_path = jobs.resolve_report_path(rec.job_id, "csv")
+        json_path = jobs.resolve_report_path(rec.job_id, "json")
+        assert csv_path.is_file()
+        assert json_path.is_file()
+        with pytest.raises(ValueError):
+            jobs.resolve_report_path(rec.job_id, "meta")
+        # Sanity: stays inside the reports base
+        assert str(csv_path).startswith(str(jobs.REPORTS_BASE))
+
+    def test_failed_job_records_error(self, monkeypatch):
+        # Force the underlying runner to raise so we exercise the failure path.
+        def _boom(**kwargs):  # noqa: ANN001
+            raise RuntimeError("synthetic failure for test")
+        monkeypatch.setattr(jobs, "run_audit_from_fixtures", _boom)
+        rec = _run_to_completion(jobs.JobParams(fixture_mode=True))
+        assert rec.status == "failed"
+        assert rec.phase == "error"
+        assert rec.error is not None
+        assert "synthetic failure" in rec.error
+
+
+# ─── Notion CSV upload sandbox ───────────────────────────────────────
+
+
+class TestUploadSandbox:
+    def test_invalid_token_rejected(self):
+        from fastapi import HTTPException
+        with pytest.raises(HTTPException) as exc:
+            _resolve_upload_path("not-hex")
+        assert exc.value.status_code == 400
+
+    def test_traversal_in_token_rejected(self):
+        from fastapi import HTTPException
+        with pytest.raises(HTTPException) as exc:
+            _resolve_upload_path("../etc/passwd")
+        assert exc.value.status_code == 400
+
+    def test_missing_file_returns_404(self, tmp_path: Path, monkeypatch):
+        # Use a well-formed but non-existent token.
+        from fastapi import HTTPException
+        with pytest.raises(HTTPException) as exc:
+            _resolve_upload_path("a" * 32)
+        assert exc.value.status_code == 404

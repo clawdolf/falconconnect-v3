@@ -372,6 +372,7 @@ async def run_audit_from_live(
     notion_csv: Optional[Path] = None,
     now: Optional[datetime] = None,
     extra_query: Optional[str] = None,
+    include_ghl: bool = True,
 ) -> Dict[str, Any]:
     """Run the audit pulling read-only data from Close + GHL.
 
@@ -395,12 +396,19 @@ async def run_audit_from_live(
         close_api_key, limit, status_label, extra_query=extra_query,
     )
 
-    # GHL contacts are fetched per-lead when a Close lead carries a GHL ID
-    # custom field. The live GHL list endpoint is heavy; per-contact GET is
-    # cheaper for an MVP audit and read-only.
-    ghl_api_key = _resolve_ghl_api_key()
     ghl_raw: List[Dict[str, Any]] = []
-    if ghl_api_key:
+    ghl_api_key = ""
+    if not include_ghl:
+        logger.info("GHL enrichment disabled for this dry-run audit.")
+    else:
+        # GHL contacts are fetched per-lead when a Close lead carries a GHL ID
+        # custom field. The live GHL list endpoint is heavy; per-contact GET is
+        # cheaper for an MVP audit and read-only.
+        ghl_api_key = _resolve_ghl_api_key()
+        if not ghl_api_key:
+            logger.warning("GHL_API_KEY not set — skipping GHL enrichment in audit.")
+
+    if include_ghl and ghl_api_key:
         for lead in close_raw:
             custom = lead.get("custom") or {}
             ghl_id = None
@@ -414,8 +422,6 @@ async def run_audit_from_live(
             contact = await _fetch_ghl_contact_live(ghl_api_key, ghl_id)
             if contact:
                 ghl_raw.append(contact)
-    else:
-        logger.warning("GHL_API_KEY not set — skipping GHL enrichment in audit.")
 
     notion_raw: List[Dict[str, Any]] = []
     if notion_csv and Path(notion_csv).exists():

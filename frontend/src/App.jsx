@@ -11,6 +11,7 @@ import Research from './components/Research'
 import GHLDashboard from './pages/GHLDashboard'
 import SmsTemplates from './components/SmsTemplates'
 import CallManagement from './components/CallManagement'
+import LeadHygiene from './components/LeadHygiene'
 import Settings from './pages/Settings'
 
 const PUBLISHABLE_KEY = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY
@@ -27,6 +28,7 @@ const NAV_ITEMS = [
   { key: 'research', label: 'Research' },
   { key: 'sms-templates', label: 'SMS Templates' },
   { key: 'calls', label: 'Call Management' },
+  { key: 'lead-hygiene', label: 'Lead Hygiene' },
   { key: 'settings', label: 'Settings' },
 ]
 
@@ -50,6 +52,8 @@ function PageContent({ currentPage, onNavigate }) {
       return <SmsTemplates />
     case 'calls':
       return <CallManagement />
+    case 'lead-hygiene':
+      return <LeadHygiene />
     case 'settings':
       return <Settings />
     default:
