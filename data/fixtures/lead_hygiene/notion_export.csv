@@ -1,0 +1,5 @@
+Name,Mobile Phone,Email,Lead Status,Opportunity Stage,Follow Up Date,Aggregate Comments,Notion Page ID
+Alice Walker,480-111-1111,alice@example.com,Not Interested/Lost,,2024-01-01,Said no thanks.,page_alice
+Bob Stevens,480-222-2222,,Contacted,,2023-06-15,Spoke briefly.,page_bob
+Carla Mendoza,480-333-3333,carla@example.com,Appointment Booked,Approved,2024-09-01,Sale closed.,page_carla
+Henry Allen,480-888-8888,,Voicemail,,2024-02-10,Left VM twice.,page_henry

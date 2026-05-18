@@ -1,0 +1,148 @@
+[
+  {
+    "id": "lead_dnc_1",
+    "display_name": "Alice Walker",
+    "status_label": "Voicemail",
+    "custom": {
+      "cf_vuP2rYRL0LA3OK0nCyZm9b19ki8ddokdTAapVnJ2Elb": "nurture"
+    },
+    "contacts": [
+      {
+        "id": "contact_a1",
+        "name": "Alice Walker",
+        "phones": [{"phone": "+14801111111"}],
+        "emails": [{"email": "alice@example.com"}]
+      }
+    ],
+    "activities": [
+      {"type": "sms", "direction": "inbound", "body": "STOP",
+       "date_created": "2025-11-01T10:00:00Z"}
+    ]
+  },
+  {
+    "id": "lead_not_interested_1",
+    "display_name": "Bob Stevens",
+    "status_label": "Not Interested",
+    "custom": {},
+    "contacts": [
+      {
+        "id": "contact_b1",
+        "name": "Bob Stevens",
+        "phones": [{"phone": "(480) 222-2222"}],
+        "emails": []
+      }
+    ],
+    "activities": [
+      {"type": "call", "direction": "outbound", "duration": 60,
+       "date_created": "2025-10-15T10:00:00Z"}
+    ]
+  },
+  {
+    "id": "lead_client_1",
+    "display_name": "Carla Mendoza",
+    "status_label": "Client",
+    "custom": {},
+    "contacts": [
+      {
+        "id": "contact_c1",
+        "name": "Carla Mendoza",
+        "phones": [{"phone": "+14803333333"}],
+        "emails": [{"email": "carla@example.com"}]
+      }
+    ],
+    "activities": []
+  },
+  {
+    "id": "lead_invalid_1",
+    "display_name": "Dan Roe",
+    "status_label": "Invalid",
+    "custom": {},
+    "contacts": [
+      {"id": "contact_d1", "name": "Dan Roe", "phones": [{"phone": "555-4444"}], "emails": []}
+    ],
+    "activities": []
+  },
+  {
+    "id": "lead_missing_phone_1",
+    "display_name": "Eve Booker",
+    "status_label": "New Lead",
+    "custom": {},
+    "contacts": [
+      {"id": "contact_e1", "name": "Eve Booker", "phones": [], "emails": [{"email": "eve@example.com"}]}
+    ],
+    "activities": []
+  },
+  {
+    "id": "lead_recent_1",
+    "display_name": "Frank Owens",
+    "status_label": "Voicemail",
+    "custom": {
+      "cf_vuP2rYRL0LA3OK0nCyZm9b19ki8ddokdTAapVnJ2Elb": "1. r0-pending"
+    },
+    "contacts": [
+      {"id": "contact_f1", "name": "Frank Owens", "phones": [{"phone": "+14806666666"}], "emails": []}
+    ],
+    "activities": [
+      {"type": "call", "direction": "outbound", "duration": 30,
+       "date_created": "2026-05-10T10:00:00Z"}
+    ]
+  },
+  {
+    "id": "lead_appointment_1",
+    "display_name": "Gina Park",
+    "status_label": "Appointment Booked",
+    "custom": {},
+    "contacts": [
+      {"id": "contact_g1", "name": "Gina Park", "phones": [{"phone": "+14807777777"}], "emails": []}
+    ],
+    "activities": [
+      {"type": "custom_activity", "activity_type_name": "Book Appointment",
+       "date_created": "2026-04-01T10:00:00Z"}
+    ]
+  },
+  {
+    "id": "lead_reengage_1",
+    "display_name": "Henry Allen",
+    "status_label": "Voicemail",
+    "custom": {
+      "cf_vuP2rYRL0LA3OK0nCyZm9b19ki8ddokdTAapVnJ2Elb": "nurture"
+    },
+    "contacts": [
+      {"id": "contact_h1", "name": "Henry Allen", "phones": [{"phone": "+14808888888"}], "emails": []}
+    ],
+    "activities": [
+      {"type": "call", "direction": "outbound", "duration": 0,
+       "date_created": "2024-08-01T10:00:00Z"}
+    ]
+  },
+  {
+    "id": "lead_already_automated_1",
+    "display_name": "Iris Quinn",
+    "status_label": "Voicemail",
+    "custom": {},
+    "contacts": [
+      {"id": "contact_i1", "name": "Iris Quinn", "phones": [{"phone": "+14809999999"}], "emails": []}
+    ],
+    "activities": []
+  },
+  {
+    "id": "lead_duplicate_phone_a",
+    "display_name": "John Dupe",
+    "status_label": "New Lead",
+    "custom": {},
+    "contacts": [
+      {"id": "contact_dupe_a", "name": "John Dupe", "phones": [{"phone": "+14801010101"}], "emails": []}
+    ],
+    "activities": []
+  },
+  {
+    "id": "lead_duplicate_phone_b",
+    "display_name": "Jonny Dupe",
+    "status_label": "New Lead",
+    "custom": {},
+    "contacts": [
+      {"id": "contact_dupe_b", "name": "Jonny Dupe", "phones": [{"phone": "+14801010101"}], "emails": []}
+    ],
+    "activities": []
+  }
+]
