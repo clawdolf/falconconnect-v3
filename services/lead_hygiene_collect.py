@@ -314,10 +314,16 @@ async def _fetch_ghl_contact_live(
     }
     async with httpx.AsyncClient(timeout=30, headers=headers) as client:
         resp = await client.get(f"{GHL_BASE}/contacts/{contact_id}")
-        if resp.status_code == 404:
+        if resp.status_code in {400, 404, 410}:
+            logger.warning(
+                "Skipping missing or invalid GHL contact during lead hygiene audit: %s returned %s",
+                contact_id,
+                resp.status_code,
+            )
             return None
         resp.raise_for_status()
-        return resp.json().get("contact", resp.json())
+        data = resp.json()
+        return data.get("contact", data)
 
 
 # ──────────────────────────────────────────────────────────────────────
