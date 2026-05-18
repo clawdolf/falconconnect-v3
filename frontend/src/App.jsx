@@ -580,10 +580,24 @@ function UserMenu() {
 }
 
 /* ── Sidebar Footer ── */
-function SidebarFooter({ onSettings }) {
+function SidebarFooter({ onSettings, collapsed, onToggleCollapse }) {
+  const footerStyle = collapsed
+    ? { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem' }
+    : { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem' }
+
   return (
-    <div className="sidebar-footer" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem' }}>
-      <UserMenu />
+    <div className="sidebar-footer" style={footerStyle}>
+      {!collapsed && <UserMenu />}
+      <button
+        onClick={onToggleCollapse}
+        className="sidebar-collapse-btn"
+        aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+        title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+        type="button"
+      >
+        <span className="sidebar-collapse-icon">{collapsed ? '›' : '‹'}</span>
+        {!collapsed && <span>Collapse</span>}
+      </button>
       <button
         onClick={onSettings}
         aria-label="Open settings"
@@ -612,7 +626,7 @@ function SidebarFooter({ onSettings }) {
           <circle cx="12" cy="12" r="3" />
           <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
         </svg>
-        Settings
+        {!collapsed && 'Settings'}
       </button>
     </div>
   )
@@ -622,21 +636,24 @@ function SidebarFooter({ onSettings }) {
 function AppLayout() {
   const [currentPage, setCurrentPage] = useState('dashboard')
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
 
   useEffect(() => { setMobileNavOpen(false) }, [currentPage])
 
   const currentLabel = NAV_ITEMS.find((i) => i.key === currentPage)?.label || 'Dashboard'
 
   return (
-    <div className="app-shell">
-      <aside className="sidebar">
+    <div className={`app-shell ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
+      <aside className={`sidebar ${sidebarCollapsed ? 'collapsed' : ''}`}>
         {/* Wordmark — desktop */}
         <div className="sidebar-wordmark-wrap">
-          <div className="sidebar-wordmark">FALCON<br />CONNECT</div>
-          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.6rem', color: 'var(--text-muted)', letterSpacing: '0.04em', marginTop: '0.2rem', lineHeight: 1.3 }}>
-            v{__APP_VERSION__}<br />
-            <span style={{ opacity: 0.6 }}>{__BUILD_DATE__}</span>
-          </div>
+          <div className="sidebar-wordmark">{sidebarCollapsed ? 'FC' : <>FALCON<br />CONNECT</>}</div>
+          {!sidebarCollapsed && (
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.6rem', color: 'var(--text-muted)', letterSpacing: '0.04em', marginTop: '0.2rem', lineHeight: 1.3 }}>
+              v{__APP_VERSION__}<br />
+              <span style={{ opacity: 0.6 }}>{__BUILD_DATE__}</span>
+            </div>
+          )}
         </div>
 
         {/* Desktop nav — always visible */}
@@ -646,9 +663,10 @@ function AppLayout() {
               key={item.key}
               className={`nav-item ${currentPage === item.key ? 'active' : ''}`}
               onClick={() => setCurrentPage(item.key)}
+              title={sidebarCollapsed ? item.label : undefined}
             >
               <span className="nav-indicator" />
-              {item.label}
+              <span className="nav-label">{item.label}</span>
             </button>
           ))}
         </nav>
@@ -675,7 +693,11 @@ function AppLayout() {
           </nav>
         )}
 
-        <SidebarFooter onSettings={() => setCurrentPage('settings')} />
+        <SidebarFooter
+          onSettings={() => setCurrentPage('settings')}
+          collapsed={sidebarCollapsed}
+          onToggleCollapse={() => setSidebarCollapsed((v) => !v)}
+        />
       </aside>
       <main className="main-content">
         <PageContent currentPage={currentPage} onNavigate={setCurrentPage} />

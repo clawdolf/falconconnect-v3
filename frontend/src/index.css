@@ -25,6 +25,7 @@
 
   /* ── Spacing ── */
   --sidebar-w: 240px;
+  --sidebar-collapsed-w: 68px;
 
   /* ── Type ── */
   --font-display: 'Space Grotesk', sans-serif;
@@ -227,6 +228,83 @@ body {
   z-index: 10;
 }
 
+.sidebar,
+.main-content {
+  transition: width 0.16s ease, min-width 0.16s ease, margin-left 0.16s ease, max-width 0.16s ease;
+}
+
+.sidebar.collapsed {
+  width: var(--sidebar-collapsed-w);
+  min-width: var(--sidebar-collapsed-w);
+}
+
+.sidebar.collapsed .sidebar-wordmark-wrap {
+  padding: 1.25rem 0.5rem;
+  text-align: center;
+}
+
+.sidebar.collapsed .sidebar-wordmark {
+  font-size: 0.82rem;
+  letter-spacing: 0.12em;
+}
+
+.sidebar.collapsed .sidebar-nav {
+  padding: 0.75rem 0;
+}
+
+.sidebar.collapsed .nav-item {
+  justify-content: center;
+  padding: 0.65rem 0;
+  gap: 0;
+}
+
+.sidebar.collapsed .nav-label {
+  display: none;
+}
+
+.sidebar.collapsed .nav-indicator {
+  width: 6px;
+  height: 6px;
+}
+
+.sidebar.collapsed .nav-item.active {
+  border-right-width: 2px;
+}
+
+.sidebar-collapse-btn {
+  width: 100%;
+  background: none;
+  border: 1px solid var(--border-subtle);
+  cursor: pointer;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  padding: 0.35rem 0.45rem;
+  border-radius: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  transition: color 0.1s, background 0.1s, border-color 0.1s;
+}
+
+.sidebar-collapse-btn:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+  border-color: var(--border);
+}
+
+.sidebar-collapse-icon {
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.app-shell.sidebar-collapsed .main-content {
+  margin-left: var(--sidebar-collapsed-w);
+  max-width: calc(100vw - var(--sidebar-collapsed-w));
+}
+
 .sidebar-wordmark-wrap {
   padding: 2rem 1.25rem 1.5rem;
   border-bottom: 1px solid var(--border-subtle);
@@ -295,9 +373,14 @@ body {
 /* ── Main content ── */
 .main-content {
   flex: 1;
+  width: calc(100vw - var(--sidebar-w));
   margin-left: var(--sidebar-w);
-  padding: 2.5rem 3rem;
+  padding: 2.5rem clamp(1.5rem, 3vw, 4rem);
   max-width: calc(100vw - var(--sidebar-w));
+}
+
+.app-shell.sidebar-collapsed .main-content {
+  width: calc(100vw - var(--sidebar-collapsed-w));
 }
 
 /* ── No-auth layout (no sidebar) ── */
@@ -336,7 +419,12 @@ body {
    ══════════════════════════════════════════════ */
 
 .dashboard {
+  width: 100%;
   max-width: 860px;
+}
+
+.lead-hygiene-dashboard {
+  max-width: none;
 }
 
 .dashboard > section {
@@ -1049,8 +1137,10 @@ body {
     display: flex;
   }
 
-  .sidebar {
+  .sidebar,
+  .sidebar.collapsed {
     width: 100%;
+    min-width: 100%;
     position: relative;
     flex-direction: row;
     flex-wrap: wrap;
@@ -1072,10 +1162,16 @@ body {
     flex-direction: column;
   }
 
-  .main-content {
+  .main-content,
+  .app-shell.sidebar-collapsed .main-content {
+    width: 100%;
     margin-left: 0;
     padding: 1.5rem 1rem;
     max-width: 100%;
+  }
+
+  .sidebar-collapse-btn {
+    display: none;
   }
 
   .status-grid {

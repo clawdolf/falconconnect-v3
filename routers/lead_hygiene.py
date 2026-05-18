@@ -377,6 +377,7 @@ async def get_run_record(job_id: str, _user=Depends(require_admin)):
 async def get_run_preview(
     job_id: str,
     limit: int = 25,
+    category: Optional[str] = None,
     _user=Depends(require_admin),
 ):
     """Return the first `limit` rows of the JSON report for the UI table."""
@@ -386,9 +387,11 @@ async def get_run_preview(
             detail="limit must be between 1 and 200.",
         )
     try:
-        return load_report_preview(job_id, limit=limit)
-    except (ValueError, FileNotFoundError) as exc:
+        return load_report_preview(job_id, limit=limit, category=category)
+    except FileNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
 
 @router.get("/runs/{job_id}/report/{kind}")

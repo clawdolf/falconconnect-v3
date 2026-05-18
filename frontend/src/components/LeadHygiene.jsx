@@ -6,6 +6,16 @@ const API_BASE = '/api/admin/lead-hygiene'
 const STATUS_PRESETS = ['Voicemail', 'Contacted', 'Re-Engage', 'Not Interested', 'All']
 const LIMIT_PRESETS = [200, 1000, 2500, 7500]
 
+const PREVIEW_FILTERS = [
+  { value: 'all', label: 'All buckets' },
+  { value: 'reengage-ready', label: 'Re-engage ready' },
+  { value: 'needs-review', label: 'Needs review' },
+  { value: 'do-not-contact', label: 'Do not contact' },
+  { value: 'recently-contacted', label: 'Recently contacted' },
+  { value: 'already-automated', label: 'Already automated' },
+  { value: 'client', label: 'Existing clients' },
+]
+
 const BUCKET_TONES = {
   'reengage-ready':           { color: 'var(--green)',  label: 'Re-engage ready' },
   'already-automated':        { color: 'var(--accent)', label: 'Already automated' },
@@ -127,6 +137,7 @@ function LeadHygiene() {
   const [selectedJob, setSelectedJob] = useState(null)
   const [preview, setPreview] = useState(null)
   const [previewLoading, setPreviewLoading] = useState(false)
+  const [previewFilter, setPreviewFilter] = useState('all')
 
   const fileInputRef = useRef(null)
 
@@ -225,7 +236,7 @@ function LeadHygiene() {
 
   // ── load selected report ──
   useEffect(() => {
-    if (!selectedJobId) { setSelectedJob(null); setPreview(null); return }
+    if (!selectedJobId) { setSelectedJob(null); setPreview(null); setPreviewFilter('all'); return }
     let cancelled = false
     const load = async () => {
       setPreviewLoading(true)
@@ -234,7 +245,9 @@ function LeadHygiene() {
         if (cancelled) return
         setSelectedJob(detail)
         if (detail.status === 'completed') {
-          const p = await authFetch(`${API_BASE}/runs/${selectedJobId}/preview?limit=25`)
+          const qs = new URLSearchParams({ limit: '100' })
+          if (previewFilter !== 'all') qs.set('category', previewFilter)
+          const p = await authFetch(`${API_BASE}/runs/${selectedJobId}/preview?${qs.toString()}`)
           if (!cancelled) setPreview(p)
         } else {
           setPreview(null)
@@ -247,7 +260,7 @@ function LeadHygiene() {
     }
     load()
     return () => { cancelled = true }
-  }, [selectedJobId, authFetch])
+  }, [selectedJobId, previewFilter, authFetch])
 
   // ── upload notion csv ──
   const onPickCsv = (e) => {
@@ -341,7 +354,7 @@ function LeadHygiene() {
   }
 
   return (
-    <div className="dashboard" style={{ maxWidth: 1100 }}>
+    <div className="dashboard lead-hygiene-dashboard">
       {/* ── A. Overview ── */}
       <section className="section">
         <div className="section-header-row">
@@ -597,7 +610,7 @@ function LeadHygiene() {
             <>
               <div style={{
                 display: 'grid',
-                gridTemplateColumns: 'minmax(220px, 280px) 1fr',
+                gridTemplateColumns: 'minmax(220px, 0.32fr) minmax(0, 1fr)',
                 gap: '1.25rem',
                 marginTop: '0.75rem',
               }}>
@@ -611,8 +624,22 @@ function LeadHygiene() {
                 </div>
 
                 <div>
-                  <div style={labelStyle}>
-                    Preview ({preview?.rows?.length || 0} of {preview?.total_rows ?? 0} rows)
+                  <div style={{ display: 'flex', alignItems: 'end', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap', marginBottom: '0.4rem' }}>
+                    <div style={labelStyle}>
+                      Preview ({preview?.rows?.length || 0} of {preview?.total_rows ?? 0} rows)
+                    </div>
+                    <div>
+                      <div style={labelStyle}>Filter report</div>
+                      <select
+                        style={inputStyle}
+                        value={previewFilter}
+                        onChange={(e) => setPreviewFilter(e.target.value)}
+                      >
+                        {PREVIEW_FILTERS.map((f) => (
+                          <option key={f.value} value={f.value}>{f.label}</option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
                   <div className="table-scroll-wrapper">
                     <table className="results-table">
@@ -644,7 +671,7 @@ function LeadHygiene() {
                   </div>
                   {preview && preview.total_rows > preview.rows.length && (
                     <p className="form-hint" style={{ marginTop: '0.5rem' }}>
-                      Showing first {preview.rows.length} of {preview.total_rows} rows. Download CSV for the full report.
+                      Showing first {preview.rows.length} of {preview.total_rows} {preview.category && preview.category !== 'all' ? 'filtered ' : ''}rows. Download CSV for the full report.
                     </p>
                   )}
                 </div>

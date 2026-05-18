@@ -324,7 +324,11 @@ def resolve_report_path(job_id: str, kind: str) -> Path:
     return candidate
 
 
-def load_report_preview(job_id: str, limit: int = 25) -> Dict[str, Any]:
+def load_report_preview(
+    job_id: str,
+    limit: int = 25,
+    category: str | None = None,
+) -> Dict[str, Any]:
     """Read the JSON report and return summary + first `limit` rows.
 
     Rows are returned as a thin projection — only the fields the UI displays —
@@ -334,14 +338,35 @@ def load_report_preview(job_id: str, limit: int = 25) -> Dict[str, Any]:
     json_path = resolve_report_path(job_id, "json")
     data = json.loads(json_path.read_text())
     rows = data.get("rows") or []
+    bucket_filter = _bucket_filter(category)
+    if bucket_filter is not None:
+        rows = [r for r in rows if r.get("recommended_bucket") in bucket_filter]
     total = len(rows)
     preview = [_preview_row(r) for r in rows[:limit]]
     return {
         "total_rows": total,
         "preview_limit": limit,
+        "category": category or "all",
         "summary": data.get("summary"),
         "rows": preview,
     }
+
+
+def _bucket_filter(category: str | None) -> set[str] | None:
+    """Map UI report-detail filters to concrete audit buckets."""
+    if not category or category == "all":
+        return None
+    filters = {
+        "reengage-ready": {"reengage-ready"},
+        "needs-review": {"needs-review", "duplicate", "missing-phone"},
+        "do-not-contact": {"do-not-contact", "not-interested", "invalid"},
+        "recently-contacted": {"recently-contacted", "previous-outreach-detected"},
+        "already-automated": {"already-automated"},
+        "client": {"client"},
+    }
+    if category not in filters:
+        raise ValueError("Unknown preview category.")
+    return filters[category]
 
 
 def _preview_row(row: Dict[str, Any]) -> Dict[str, Any]:

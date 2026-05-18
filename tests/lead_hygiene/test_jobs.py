@@ -177,6 +177,29 @@ class TestFixtureBackgroundRun:
             assert "activity_summary" not in row
             assert "recommended_close_update" not in row
 
+    def test_preview_filters_hard_stop_group(self):
+        rec = _run_to_completion(jobs.JobParams(fixture_mode=True))
+        preview = jobs.load_report_preview(rec.job_id, limit=20, category="do-not-contact")
+        assert preview["category"] == "do-not-contact"
+        assert preview["total_rows"] > 0
+        assert {r["recommended_bucket"] for r in preview["rows"]} <= {
+            "do-not-contact", "not-interested", "invalid",
+        }
+
+    def test_preview_filters_needs_review_group(self):
+        rec = _run_to_completion(jobs.JobParams(fixture_mode=True))
+        preview = jobs.load_report_preview(rec.job_id, limit=20, category="needs-review")
+        assert preview["category"] == "needs-review"
+        assert preview["total_rows"] > 0
+        assert {r["recommended_bucket"] for r in preview["rows"]} <= {
+            "needs-review", "duplicate", "missing-phone",
+        }
+
+    def test_preview_unknown_category_rejected(self):
+        rec = _run_to_completion(jobs.JobParams(fixture_mode=True))
+        with pytest.raises(ValueError):
+            jobs.load_report_preview(rec.job_id, category="not-a-category")
+
     def test_download_paths_resolve_after_run(self):
         rec = _run_to_completion(jobs.JobParams(fixture_mode=True))
         csv_path = jobs.resolve_report_path(rec.job_id, "csv")
