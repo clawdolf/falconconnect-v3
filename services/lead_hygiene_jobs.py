@@ -356,17 +356,29 @@ def _bucket_filter(category: str | None) -> set[str] | None:
     """Map UI report-detail filters to concrete audit buckets."""
     if not category or category == "all":
         return None
-    filters = {
-        "reengage-ready": {"reengage-ready"},
-        "needs-review": {"needs-review", "duplicate", "missing-phone"},
-        "do-not-contact": {"do-not-contact", "not-interested", "invalid"},
-        "recently-contacted": {"recently-contacted", "previous-outreach-detected"},
-        "already-automated": {"already-automated"},
-        "client": {"client"},
+    grouped_filters = {
+        "needs-review-group": {"needs-review", "duplicate", "missing-phone"},
+        "hard-stop": {"do-not-contact", "not-interested", "invalid"},
+        "recent-touch-group": {"recently-contacted", "previous-outreach-detected"},
     }
-    if category not in filters:
-        raise ValueError("Unknown preview category.")
-    return filters[category]
+    concrete_buckets = {
+        "reengage-ready",
+        "already-automated",
+        "previous-outreach-detected",
+        "needs-review",
+        "duplicate",
+        "missing-phone",
+        "client",
+        "invalid",
+        "not-interested",
+        "do-not-contact",
+        "recently-contacted",
+    }
+    if category in concrete_buckets:
+        return {category}
+    if category in grouped_filters:
+        return grouped_filters[category]
+    raise ValueError("Unknown preview category.")
 
 
 def _preview_row(row: Dict[str, Any]) -> Dict[str, Any]:

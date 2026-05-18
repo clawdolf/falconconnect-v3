@@ -95,21 +95,36 @@ function SourceCard({ name, available, mode }) {
   )
 }
 
-function BucketRow({ bucket, count }) {
-  const t = BUCKET_TONES[bucket] || { color: 'var(--text-muted)', label: bucket }
+function BucketRow({ bucket, count, active = false, onClick }) {
+  const t = bucket === 'all'
+    ? { color: 'var(--text-muted)', label: 'All buckets' }
+    : (BUCKET_TONES[bucket] || { color: 'var(--text-muted)', label: bucket })
   return (
-    <div style={{
-      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-      padding: '0.4rem 0', borderBottom: '1px solid var(--border-subtle)',
-    }}>
-      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontFamily: 'var(--font-mono)', fontSize: '0.72rem', color: 'var(--text)' }}>
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      style={{
+        width: '100%',
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '0.48rem 0.45rem',
+        border: '1px solid transparent',
+        borderBottomColor: 'var(--border-subtle)',
+        borderRadius: 2,
+        background: active ? 'var(--surface-hover)' : 'transparent',
+        color: 'inherit',
+        cursor: 'pointer',
+        textAlign: 'left',
+      }}
+    >
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontFamily: 'var(--font-mono)', fontSize: '0.72rem', color: active ? 'var(--text)' : 'var(--text-muted)' }}>
         <span style={dot(t.color)} />
         {t.label}
       </span>
-      <span style={{ fontFamily: 'var(--font-display)', fontSize: '1rem', fontWeight: 600, color: 'var(--text)' }}>
+      <span style={{ fontFamily: 'var(--font-display)', fontSize: '1rem', fontWeight: 600, color: active ? t.color : 'var(--text)' }}>
         {count}
       </span>
-    </div>
+    </button>
   )
 }
 
@@ -332,6 +347,9 @@ function LeadHygiene() {
   }, [selectedJob, lastCompleted])
 
   const statusOptions = [...STATUS_PRESETS, 'Custom']
+  const selectedPreviewFilterLabel = PREVIEW_FILTERS.find(f => f.value === previewFilter)?.label
+    || BUCKET_TONES[previewFilter]?.label
+    || 'All buckets'
 
   // ── input styles (existing tokens have no native dark select) ──
   const inputStyle = {
@@ -615,30 +633,32 @@ function LeadHygiene() {
                 marginTop: '0.75rem',
               }}>
                 <div>
-                  <div style={labelStyle}>Bucket counts</div>
-                  <div>
+                  <div style={labelStyle}>Bucket filter</div>
+                  <div style={{ borderTop: '1px solid var(--border-subtle)' }}>
+                    <BucketRow
+                      bucket="all"
+                      count={(selectedJob?.summary?.total) ?? (lastCompleted?.summary?.total) ?? 0}
+                      active={previewFilter === 'all'}
+                      onClick={() => setPreviewFilter('all')}
+                    />
                     {summaryBuckets.length === 0
                       ? <p className="no-results">No rows.</p>
-                      : summaryBuckets.map(([b, n]) => <BucketRow key={b} bucket={b} count={n} />)}
+                      : summaryBuckets.map(([b, n]) => (
+                        <BucketRow
+                          key={b}
+                          bucket={b}
+                          count={n}
+                          active={previewFilter === b}
+                          onClick={() => setPreviewFilter(b)}
+                        />
+                      ))}
                   </div>
                 </div>
 
                 <div>
-                  <div style={{ display: 'flex', alignItems: 'end', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap', marginBottom: '0.4rem' }}>
+                  <div style={{ marginBottom: '0.4rem' }}>
                     <div style={labelStyle}>
-                      Preview ({preview?.rows?.length || 0} of {preview?.total_rows ?? 0} rows)
-                    </div>
-                    <div>
-                      <div style={labelStyle}>Filter report</div>
-                      <select
-                        style={inputStyle}
-                        value={previewFilter}
-                        onChange={(e) => setPreviewFilter(e.target.value)}
-                      >
-                        {PREVIEW_FILTERS.map((f) => (
-                          <option key={f.value} value={f.value}>{f.label}</option>
-                        ))}
-                      </select>
+                      Preview: {selectedPreviewFilterLabel} ({preview?.rows?.length || 0} of {preview?.total_rows ?? 0} rows)
                     </div>
                   </div>
                   <div className="table-scroll-wrapper">

@@ -179,8 +179,8 @@ class TestFixtureBackgroundRun:
 
     def test_preview_filters_hard_stop_group(self):
         rec = _run_to_completion(jobs.JobParams(fixture_mode=True))
-        preview = jobs.load_report_preview(rec.job_id, limit=20, category="do-not-contact")
-        assert preview["category"] == "do-not-contact"
+        preview = jobs.load_report_preview(rec.job_id, limit=20, category="hard-stop")
+        assert preview["category"] == "hard-stop"
         assert preview["total_rows"] > 0
         assert {r["recommended_bucket"] for r in preview["rows"]} <= {
             "do-not-contact", "not-interested", "invalid",
@@ -188,12 +188,19 @@ class TestFixtureBackgroundRun:
 
     def test_preview_filters_needs_review_group(self):
         rec = _run_to_completion(jobs.JobParams(fixture_mode=True))
-        preview = jobs.load_report_preview(rec.job_id, limit=20, category="needs-review")
-        assert preview["category"] == "needs-review"
+        preview = jobs.load_report_preview(rec.job_id, limit=20, category="needs-review-group")
+        assert preview["category"] == "needs-review-group"
         assert preview["total_rows"] > 0
         assert {r["recommended_bucket"] for r in preview["rows"]} <= {
             "needs-review", "duplicate", "missing-phone",
         }
+
+    def test_preview_filters_exact_bucket(self):
+        rec = _run_to_completion(jobs.JobParams(fixture_mode=True))
+        preview = jobs.load_report_preview(rec.job_id, limit=20, category="duplicate")
+        assert preview["category"] == "duplicate"
+        assert preview["total_rows"] > 0
+        assert {r["recommended_bucket"] for r in preview["rows"]} == {"duplicate"}
 
     def test_preview_unknown_category_rejected(self):
         rec = _run_to_completion(jobs.JobParams(fixture_mode=True))
