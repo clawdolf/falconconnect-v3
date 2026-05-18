@@ -13,7 +13,7 @@ from slowapi.errors import RateLimitExceeded
 from db.database import init_db
 from middleware.security_headers import SecurityHeadersMiddleware
 from routers import leads, webhooks, calendar, analytics, admin, licenses, agents, campaigns, ad_leads, close_webhooks, close_lead_status, conference
-from routers import ghl_cadence, cadence_sms, research
+from routers import ghl_cadence, cadence_sms, research, lead_hygiene
 from routers.sheets import router as sheets_router
 from routers.ghl_dashboard import router as ghl_dashboard_router
 from routers.sms_templates import router as sms_templates_router
@@ -609,6 +609,7 @@ app.include_router(conference.router, prefix="/api", tags=["Conference Bridge"])
 app.include_router(ghl_cadence.router, prefix="/api/ghl", tags=["GHL Cadence"])
 app.include_router(cadence_sms.router, prefix="/api/close", tags=["Cadence SMS"])
 app.include_router(close_lead_status.router, prefix="/api/close", tags=["Close Lead Status Kill-Switch"])
+app.include_router(lead_hygiene.router, prefix="/api/admin/lead-hygiene", tags=["Lead Hygiene (admin, dry-run)"])
 
 @app.get("/api/health/gcal")
 async def health_gcal():

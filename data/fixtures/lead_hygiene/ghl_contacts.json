@@ -1,0 +1,26 @@
+[
+  {
+    "id": "ghl_alice",
+    "firstName": "Alice",
+    "lastName": "Walker",
+    "phone": "+14801111111",
+    "email": "alice@example.com",
+    "tags": ["rvm-staging"]
+  },
+  {
+    "id": "ghl_iris",
+    "firstName": "Iris",
+    "lastName": "Quinn",
+    "phone": "+14809999999",
+    "email": null,
+    "tags": ["rvm-complete", "r0-complete"]
+  },
+  {
+    "id": "ghl_henry",
+    "firstName": "Henry",
+    "lastName": "Allen",
+    "phone": "+14808888888",
+    "email": null,
+    "tags": []
+  }
+]
