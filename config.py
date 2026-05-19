@@ -43,6 +43,7 @@ class Settings(BaseSettings):
     # --- Clerk Auth ---
     clerk_publishable_key: str = ""
     clerk_secret_key: str = ""
+    fc_menu_bar_token: str = ""
 
     # --- Calendar Email Domain (for dummy GCal ↔ Close linking emails) ---
     calendar_email_domain: str = "appt.invalid"

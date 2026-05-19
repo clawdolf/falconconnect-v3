@@ -7,10 +7,12 @@ import base64
 import hashlib
 import hmac
 import logging
+import os
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Security
 from fastapi.responses import Response
+from fastapi.security import HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,7 +20,7 @@ from sqlalchemy import select
 
 from db.database import get_session
 from db.models import ConferenceSession
-from middleware.auth import require_auth
+from middleware.auth import _verify_clerk_token, require_auth, security
 from config import get_settings
 from services import conference as conf_service
 from services import twilio_client
@@ -40,6 +42,32 @@ async def _assert_conf_ownership(
         raise HTTPException(status_code=403, detail="Not your conference session")
 
 logger = logging.getLogger("falconconnect.router.conference")
+
+
+async def require_bridge_control_auth(
+    credentials: Optional[HTTPAuthorizationCredentials] = Security(security),
+) -> dict:
+    """Allow Clerk JWTs or a dedicated menu-bar token for bridge controls only."""
+    if not credentials:
+        raise HTTPException(
+            status_code=401,
+            detail="Missing Authorization header.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    token = credentials.credentials or ""
+    settings = get_settings()
+    menu_token = (settings.fc_menu_bar_token or "").strip()
+    if menu_token and hmac.compare_digest(token, menu_token):
+        admin_user_id = os.environ.get("CLERK_ADMIN_USER_ID", "user_3ASrwDOrSTaDxCus6f1B5lnDsgz")
+        return {
+            "sub": admin_user_id,
+            "user_id": admin_user_id,
+            "auth_mode": "menu_bar_token",
+        }
+
+    return await _verify_clerk_token(token)
+
 
 router = APIRouter()
 
@@ -183,7 +211,7 @@ async def start_bridge_session(
 @router.get("/conference/bridge/live")
 async def find_live_bridge(
     session: AsyncSession = Depends(get_session),
-    user=Depends(require_auth),
+    user=Depends(require_bridge_control_auth),
 ):
     """Find the newest active bridge, including signed Twilio auto-detected transfers."""
     result = await conf_service.find_live_bridge(
@@ -197,7 +225,7 @@ async def find_live_bridge(
 @router.get("/conference/carrier-favorites")
 async def list_carrier_favorites(
     session: AsyncSession = Depends(get_session),
-    user=Depends(require_auth),
+    user=Depends(require_bridge_control_auth),
 ):
     return await conf_service.list_carrier_favorites(
         session, user_id=user.get("user_id") or user.get("sub")
@@ -304,7 +332,7 @@ async def upgrade_conference(
     conf_id: str,
     request: Request,
     session: AsyncSession = Depends(get_session),
-    user=Depends(require_auth),
+    user=Depends(require_bridge_control_auth),
 ):
     """Redirect the Close child leg into conference first."""
     await _assert_conf_ownership(session, conf_id, user)
@@ -328,7 +356,7 @@ async def add_carrier(
     req: CarrierRequest,
     request: Request,
     session: AsyncSession = Depends(get_session),
-    user=Depends(require_auth),
+    user=Depends(require_bridge_control_auth),
 ):
     """Add the carrier as the third conference participant."""
     await _assert_conf_ownership(session, conf_id, user)
@@ -352,7 +380,7 @@ async def add_carrier(
 async def get_conference(
     conf_id: str,
     session: AsyncSession = Depends(get_session),
-    user=Depends(require_auth),
+    user=Depends(require_bridge_control_auth),
 ):
     """Get live conference status including participant states."""
     await _assert_conf_ownership(session, conf_id, user)
@@ -367,7 +395,7 @@ async def mute_participant(
     conf_id: str,
     participant: str,
     session: AsyncSession = Depends(get_session),
-    user=Depends(require_auth),
+    user=Depends(require_bridge_control_auth),
 ):
     """Mute a participant (seb|lead|carrier)."""
     await _assert_conf_ownership(session, conf_id, user)
@@ -383,7 +411,7 @@ async def unmute_participant(
     conf_id: str,
     participant: str,
     session: AsyncSession = Depends(get_session),
-    user=Depends(require_auth),
+    user=Depends(require_bridge_control_auth),
 ):
     """Unmute a participant."""
     await _assert_conf_ownership(session, conf_id, user)
@@ -399,7 +427,7 @@ async def hold_participant(
     conf_id: str,
     participant: str,
     session: AsyncSession = Depends(get_session),
-    user=Depends(require_auth),
+    user=Depends(require_bridge_control_auth),
 ):
     """Put a participant on hold with music."""
     await _assert_conf_ownership(session, conf_id, user)
@@ -415,7 +443,7 @@ async def unhold_participant(
     conf_id: str,
     participant: str,
     session: AsyncSession = Depends(get_session),
-    user=Depends(require_auth),
+    user=Depends(require_bridge_control_auth),
 ):
     """Take a participant off hold."""
     await _assert_conf_ownership(session, conf_id, user)
@@ -431,7 +459,7 @@ async def drop_participant(
     conf_id: str,
     participant: str,
     session: AsyncSession = Depends(get_session),
-    user=Depends(require_auth),
+    user=Depends(require_bridge_control_auth),
 ):
     """Drop one participant call leg without ending the whole conference."""
     await _assert_conf_ownership(session, conf_id, user)
@@ -446,7 +474,7 @@ async def drop_participant(
 async def end_conference(
     conf_id: str,
     session: AsyncSession = Depends(get_session),
-    user=Depends(require_auth),
+    user=Depends(require_bridge_control_auth),
 ):
     """End a conference — hangs up all participants, logs to Close."""
     await _assert_conf_ownership(session, conf_id, user)
