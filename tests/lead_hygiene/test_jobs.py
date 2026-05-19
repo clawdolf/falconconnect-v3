@@ -12,8 +12,12 @@ import json
 from pathlib import Path
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
+from middleware.auth import require_auth
+from routers.lead_hygiene import router
 from routers.lead_hygiene import StartJobRequest, _resolve_upload_path
 from services import lead_hygiene_jobs as jobs
 
@@ -128,6 +132,17 @@ def _run_to_completion(params: jobs.JobParams) -> jobs.JobRecord:
     return asyncio.run(_go())
 
 
+def _make_app(user_id: str = "user_3ASrwDOrSTaDxCus6f1B5lnDsgz") -> FastAPI:
+    app = FastAPI()
+    app.include_router(router, prefix="/api/admin/lead-hygiene")
+
+    async def _auth_override():
+        return {"sub": user_id, "user_id": user_id}
+
+    app.dependency_overrides[require_auth] = _auth_override
+    return app
+
+
 class TestFixtureBackgroundRun:
     def test_full_lifecycle_fixture(self):
         rec = _run_to_completion(jobs.JobParams(fixture_mode=True, limit=11))
@@ -145,6 +160,16 @@ class TestFixtureBackgroundRun:
         rec = _run_to_completion(jobs.JobParams(fixture_mode=True))
         runs = jobs.list_runs()
         assert any(r["job_id"] == rec.job_id for r in runs)
+
+    def test_list_runs_survives_registry_reload_from_disk(self):
+        rec = _run_to_completion(jobs.JobParams(fixture_mode=True))
+        jobs._reset_registry_for_tests()
+        runs = jobs.list_runs()
+        reloaded = next(r for r in runs if r["job_id"] == rec.job_id)
+        assert reloaded["status"] == "completed"
+        assert reloaded["reports"]["json"] is True
+        assert reloaded["row_count"] == 11
+        assert reloaded["short_job_id"] == rec.job_id[:8]
 
     def test_public_record_does_not_leak_upload_path(self):
         params = jobs.JobParams(fixture_mode=True, notion_csv_path="/tmp/secret/archive.csv")
@@ -228,6 +253,63 @@ class TestFixtureBackgroundRun:
         assert rec.phase == "error"
         assert rec.error is not None
         assert "synthetic failure" in rec.error
+
+    def test_history_endpoint_does_not_expose_absolute_paths(self):
+        rec = _run_to_completion(jobs.JobParams(fixture_mode=True, notion_csv_path="/tmp/secret/archive.csv"))
+        client = TestClient(_make_app())
+
+        res = client.get("/api/admin/lead-hygiene/runs?limit=100")
+
+        assert res.status_code == 200, res.text
+        assert rec.job_id in res.text
+        assert str(jobs.REPORTS_BASE) not in res.text
+        assert "/tmp/secret" not in res.text
+        assert "lead_hygiene_report.json" not in res.text
+
+    def test_delete_removes_local_run_and_memory_registry(self):
+        rec = _run_to_completion(jobs.JobParams(fixture_mode=True))
+        run_dir = Path(rec.run_dir)
+        assert rec.job_id in jobs._REGISTRY
+
+        result = jobs.delete_run(rec.job_id)
+
+        assert result["deleted"] is True
+        assert result["job_id"] == rec.job_id
+        assert result["removed_files"] >= 3
+        assert not run_dir.exists()
+        assert rec.job_id not in jobs._REGISTRY
+        assert jobs.get_run(rec.job_id) is None
+
+    def test_delete_rejects_running_job_with_409(self):
+        job_id = "c" * 32
+        run_dir = jobs.REPORTS_BASE / f"run-20260518T180000Z-{job_id[:12]}"
+        run_dir.mkdir(parents=True)
+        rec = jobs.JobRecord(
+            job_id=job_id,
+            status="running",
+            params={},
+            started_at="2026-05-18T18:00:00+00:00",
+            run_dir=str(run_dir),
+        )
+        jobs._REGISTRY[job_id] = rec
+        client = TestClient(_make_app())
+
+        res = client.delete(f"/api/admin/lead-hygiene/runs/{job_id}")
+
+        assert res.status_code == 409, res.text
+        assert run_dir.exists()
+        assert job_id in jobs._REGISTRY
+
+    def test_delete_rejects_invalid_job_ids(self):
+        client = TestClient(_make_app())
+        for bad_id in ("not-a-uuid", "../../etc/passwd", "a" * 31):
+            res = client.delete(f"/api/admin/lead-hygiene/runs/{bad_id}")
+            assert res.status_code in {400, 404}, res.text
+
+    def test_delete_missing_job_returns_404(self):
+        client = TestClient(_make_app())
+        res = client.delete(f"/api/admin/lead-hygiene/runs/{'d' * 32}")
+        assert res.status_code == 404, res.text
 
 
 # ─── Notion CSV upload sandbox ───────────────────────────────────────

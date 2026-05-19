@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import uuid
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
@@ -79,14 +80,23 @@ class JobRecord:
         """Public-facing dict — strips raw filesystem paths and internal metadata."""
         public_params = dict(self.params)
         public_params["notion_csv_path"] = bool(public_params.get("notion_csv_path"))
+        row_count = _summary_row_count(self.summary)
         return {
             "job_id": self.job_id,
+            "short_job_id": self.job_id[:8],
+            "label": _display_label(
+                status=self.status,
+                row_count=row_count,
+                started_at=self.started_at,
+                short_job_id=self.job_id[:8],
+            ),
             "status": self.status,
             "phase": self.phase,
             "params": public_params,
             "started_at": self.started_at,
             "finished_at": self.finished_at,
             "summary": self.summary,
+            "row_count": row_count,
             "error": self.error,
             "sources": self.sources,
             "reports": _available_reports(self.run_dir),
@@ -120,14 +130,37 @@ def _resolve_run_dir(run_dirname: str) -> Path:
 
 
 def _available_reports(run_dir_str: Optional[str]) -> Dict[str, bool]:
-    """Return {kind: exists} for each known report file in the run dir."""
+    """Return {kind: exists} for each known report file in a safe run dir."""
     out = {k: False for k in _REPORT_FILES}
     if not run_dir_str:
         return out
-    run_dir = Path(run_dir_str)
+    try:
+        base = REPORTS_BASE.resolve()
+        run_dir = Path(run_dir_str).resolve()
+    except Exception:  # noqa: BLE001
+        return out
+    if not _RUN_DIR_RE.match(run_dir.name):
+        return out
+    if base != run_dir and base not in run_dir.parents:
+        return out
     for kind, fname in _REPORT_FILES.items():
         out[kind] = (run_dir / fname).is_file()
     return out
+
+
+def _summary_row_count(summary: Optional[Dict[str, Any]]) -> Optional[int]:
+    if not isinstance(summary, dict):
+        return None
+    for key in ("total", "total_rows", "rows_seen", "row_count"):
+        value = summary.get(key)
+        if isinstance(value, int):
+            return value
+    return None
+
+
+def _display_label(status: str, row_count: Optional[int], started_at: str, short_job_id: str) -> str:
+    row_label = f"{row_count:,} rows" if isinstance(row_count, int) else "rows unknown"
+    return f"{status.replace('_', ' ').title()} - {row_label} - {started_at or 'date unknown'} - {short_job_id}"
 
 
 def _write_meta(record: JobRecord) -> None:
@@ -322,6 +355,45 @@ def resolve_report_path(job_id: str, kind: str) -> Path:
     if not candidate.is_file():
         raise FileNotFoundError("Report file does not exist yet.")
     return candidate
+
+
+def delete_run(job_id: str) -> Dict[str, Any]:
+    """Delete one local report run directory and its in-memory registry entry.
+
+    This only removes Lead Hygiene report files under REPORTS_BASE. It refuses
+    active jobs and never touches Registry-imported database records or any
+    external system.
+    """
+    if not _JOB_ID_RE.match(job_id or ""):
+        raise ValueError("Invalid job id.")
+    rec = get_run(job_id)
+    if rec is None or not rec.run_dir:
+        raise FileNotFoundError("Run not found.")
+    if rec.status in {"queued", "running"}:
+        raise RuntimeError("Cannot delete a queued or running Lead Hygiene job.")
+    if rec.status not in {"completed", "failed", "canceled", "cancelled"}:
+        raise RuntimeError("Only completed, failed, or canceled Lead Hygiene jobs can be deleted.")
+
+    base = REPORTS_BASE.resolve()
+    run_dir = Path(rec.run_dir).resolve()
+    if not _RUN_DIR_RE.match(run_dir.name):
+        raise ValueError("Invalid run directory name.")
+    if base != run_dir and base not in run_dir.parents:
+        raise ValueError("Run directory escapes reports base.")
+    if not run_dir.exists() or not run_dir.is_dir():
+        raise FileNotFoundError("Run not found.")
+
+    removed_count = sum(1 for child in run_dir.rglob("*") if child.is_file())
+    shutil.rmtree(run_dir)
+    _REGISTRY.pop(job_id, None)
+    task = _TASKS.pop(job_id, None)
+    if task and not task.done():
+        _TASKS[job_id] = task
+    return {
+        "deleted": True,
+        "job_id": job_id,
+        "removed_files": removed_count,
+    }
 
 
 def load_report_preview(

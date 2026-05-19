@@ -128,13 +128,14 @@ function BucketRow({ bucket, count, active = false, onClick }) {
   )
 }
 
-function LeadHygiene() {
+function LeadHygiene({ onReportsChanged }) {
   const { getToken } = useAuth()
 
   const [sources, setSources] = useState(null)
   const [runs, setRuns] = useState([])
   const [runsLoading, setRunsLoading] = useState(false)
   const [error, setError] = useState(null)
+  const [deletingJobId, setDeletingJobId] = useState(null)
 
   const [statusLabel, setStatusLabel] = useState('Voicemail')
   const [statusFreeText, setStatusFreeText] = useState('')
@@ -212,7 +213,7 @@ function LeadHygiene() {
   const loadRuns = useCallback(async () => {
     setRunsLoading(true)
     try {
-      const data = await authFetch(`${API_BASE}/runs?limit=25`)
+      const data = await authFetch(`${API_BASE}/runs?limit=100`)
       setRuns(data.runs || [])
     } catch (e) { setError(e.message) }
     finally { setRunsLoading(false) }
@@ -233,6 +234,7 @@ function LeadHygiene() {
         if (data.status === 'completed' || data.status === 'failed') {
           // refresh the list and select the finished run for inspection
           loadRuns()
+          onReportsChanged?.()
           setSelectedJobId(activeJobId)
           setActiveJobId(null)
           return
@@ -321,6 +323,36 @@ function LeadHygiene() {
       setRuns((prev) => [job, ...prev.filter(r => r.job_id !== job.job_id)])
     } catch (e) { setError(e.message) }
     finally { setStarting(false) }
+  }
+
+  const deleteRun = async (job) => {
+    if (!job?.job_id) return
+    if (job.status === 'queued' || job.status === 'running') {
+      setError('Queued or running Lead Hygiene jobs cannot be deleted.')
+      return
+    }
+    const ok = window.confirm(`Local-only delete Lead Hygiene report ${shortId(job.job_id)}? Registry imports and external systems will not be changed.`)
+    if (!ok) return
+    setDeletingJobId(job.job_id)
+    setError(null)
+    try {
+      await authFetch(`${API_BASE}/runs/${job.job_id}`, { method: 'DELETE' })
+      if (selectedJobId === job.job_id) {
+        setSelectedJobId(null)
+        setSelectedJob(null)
+        setPreview(null)
+      }
+      if (activeJobId === job.job_id) {
+        setActiveJobId(null)
+        setActiveJob(null)
+      }
+      await loadRuns()
+      onReportsChanged?.()
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setDeletingJobId(null)
+    }
   }
 
   // ── derived data ──
@@ -543,7 +575,7 @@ function LeadHygiene() {
 
       {/* ── C. Reports list ── */}
       <section className="section">
-        <h2 className="section-title">Recent Runs</h2>
+        <h2 className="section-title">Hygiene Report History</h2>
         {runs.length === 0 ? (
           <p className="no-results">No runs yet. Start one above.</p>
         ) : (
@@ -559,7 +591,7 @@ function LeadHygiene() {
                   <th>DNC / HS</th>
                   <th>Re-engage</th>
                   <th>Job</th>
-                  <th></th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -567,6 +599,7 @@ function LeadHygiene() {
                   const buckets = r.summary?.by_bucket || {}
                   const dnc = (buckets['do-not-contact']||0) + (buckets['not-interested']||0) + (buckets['invalid']||0)
                   const isSel = selectedJobId === r.job_id
+                  const canDelete = r.status !== 'queued' && r.status !== 'running'
                   return (
                     <tr key={r.job_id} style={{ background: isSel ? 'var(--surface-hover)' : undefined }}>
                       <td>{fmtTime(r.started_at)}</td>
@@ -582,9 +615,25 @@ function LeadHygiene() {
                       <td style={{ color: 'var(--green)' }}>{r.summary ? (buckets['reengage-ready']||0) : '—'}</td>
                       <td style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{shortId(r.job_id)}…</td>
                       <td>
-                        <button className="btn btn-sm" onClick={() => setSelectedJobId(r.job_id)}>
-                          {isSel ? 'Selected' : 'Open'}
-                        </button>
+                        <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
+                          <button className="btn btn-sm" onClick={() => setSelectedJobId(r.job_id)}>
+                            {isSel ? 'Selected' : 'View'}
+                          </button>
+                          <button className="btn btn-sm" disabled={!r.reports?.csv} onClick={() => downloadUrl(r.job_id, 'csv')}>
+                            CSV
+                          </button>
+                          <button className="btn btn-sm" disabled={!r.reports?.json} onClick={() => downloadUrl(r.job_id, 'json')}>
+                            JSON
+                          </button>
+                          <button
+                            className="btn btn-sm"
+                            disabled={!canDelete || deletingJobId === r.job_id}
+                            onClick={() => deleteRun(r)}
+                            style={{ color: canDelete ? 'var(--red)' : undefined, borderColor: canDelete ? 'var(--red)' : undefined }}
+                          >
+                            {deletingJobId === r.job_id ? 'Deleting…' : 'Local-only delete'}
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   )

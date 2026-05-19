@@ -37,6 +37,7 @@ from services.lead_hygiene_collect import (
 from services.lead_hygiene_jobs import (
     JobParams,
     REPORTS_BASE,
+    delete_run,
     get_run,
     list_runs,
     load_report_preview,
@@ -371,6 +372,19 @@ async def get_run_record(job_id: str, _user=Depends(require_admin)):
             detail="Run not found.",
         )
     return rec.to_public()
+
+
+@router.delete("/runs/{job_id}")
+async def delete_run_record(job_id: str, _user=Depends(require_admin)):
+    """Delete a finished local Lead Hygiene report run."""
+    try:
+        return delete_run(job_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
 
 @router.get("/runs/{job_id}/preview")

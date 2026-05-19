@@ -433,7 +433,7 @@ export default function Registry() {
       {tab === 'Hygiene' && (
         <>
           {importPanel}
-          <LeadHygiene />
+          <LeadHygiene onReportsChanged={loadCore} />
         </>
       )}
 

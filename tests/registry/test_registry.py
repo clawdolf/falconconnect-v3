@@ -176,6 +176,26 @@ def test_lead_hygiene_reports_marks_completed_missing_json_not_importable(tmp_pa
     assert report["importable"] is False
 
 
+def test_lead_hygiene_reports_excludes_deleted_run(tmp_path, monkeypatch):
+    if not HAS_AIOSQLITE:
+        import pytest
+        pytest.skip("aiosqlite is not installed in this local environment")
+    monkeypatch.setenv("CLERK_ADMIN_USER_ID", "user_3ASrwDOrSTaDxCus6f1B5lnDsgz")
+    job_id = _install_report(tmp_path, monkeypatch, job_id="c" * 32)
+    client = TestClient(_make_app(session_factory=None))
+
+    before = client.get("/api/admin/registry/lead-hygiene-reports")
+    assert before.status_code == 200, before.text
+    assert [report["job_id"] for report in before.json()] == [job_id]
+
+    result = jobs.delete_run(job_id)
+    assert result["deleted"] is True
+
+    after = client.get("/api/admin/registry/lead-hygiene-reports")
+    assert after.status_code == 200, after.text
+    assert after.json() == []
+
+
 def test_admin_guard_rejects_non_admin(monkeypatch):
     if not HAS_AIOSQLITE:
         import pytest
