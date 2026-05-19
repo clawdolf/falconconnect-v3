@@ -739,27 +739,21 @@ async def _log_to_close(conf: ConferenceSession) -> None:
 
     duration = conf.call_duration_seconds or 0
     note = (
-        "3 Way Bridge via FalconConnect. "
-        f"Carrier: {conf.carrier_phone or 'not added'}. "
-        f"Duration: {duration}s."
+        "3 Way Bridge via FalconConnect\n"
+        f"Lead: {conf.lead_phone}\n"
+        f"Carrier: {conf.carrier_phone or 'not added'}\n"
+        f"Duration: {duration}s\n"
+        "Call recordings stay on the native Close call activities."
     )
-    payload = {
-        "lead_id": lead_id,
-        "direction": "outbound",
-        "duration": duration,
-        "note": note,
-        "status": "completed",
-        "remote_phone": conf.lead_phone,
-        "phone": _seb_close_number(),
-    }
+    payload = {"lead_id": lead_id, "note": note}
     async with httpx.AsyncClient(timeout=15.0) as client:
         resp = await client.post(
-            "https://api.close.com/api/v1/activity/call/",
+            "https://api.close.com/api/v1/activity/note/",
             json=payload,
             auth=(settings.close_api_key, ""),
         )
         resp.raise_for_status()
-        logger.info("Logged bridge %s to Close as call activity", conf.id)
+        logger.info("Logged bridge %s to Close as note activity", conf.id)
 
 
 def _seb_close_number() -> str:
