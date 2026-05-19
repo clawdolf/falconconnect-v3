@@ -63,7 +63,8 @@ class Settings(BaseSettings):
     # --- Twilio (Conference Bridge) ---
     twilio_account_sid: str = ""
     twilio_auth_token: str = ""
-    twilio_from_number: str = "+18446813690"
+    twilio_from_number: str = ""
+    twilio_seb_close_number: str = ""
 
     # --- Cloudflare Turnstile (bot protection on public lead forms) ---
     # If empty, verification is skipped (rollout coordination mode).

@@ -6,7 +6,6 @@ All Twilio API calls for the conference bridge go through this module.
 import logging
 from base64 import b64encode
 from typing import Any, Dict, List, Optional
-from urllib.parse import urlencode
 
 import httpx
 
@@ -40,6 +39,10 @@ async def create_participant(
     early_media: bool = False,
     machine_detection: Optional[str] = None,
     timeout: int = 30,
+    muted: Optional[bool] = None,
+    beep: Optional[str] = None,
+    start_conference_on_enter: Optional[bool] = None,
+    end_conference_on_exit: Optional[bool] = None,
 ) -> Dict[str, Any]:
     """Add a participant to a conference via Twilio Participants API.
 
@@ -59,6 +62,14 @@ async def create_participant(
     }
     if machine_detection:
         data["MachineDetection"] = machine_detection
+    if muted is not None:
+        data["Muted"] = str(muted).lower()
+    if beep is not None:
+        data["Beep"] = beep
+    if start_conference_on_enter is not None:
+        data["StartConferenceOnEnter"] = str(start_conference_on_enter).lower()
+    if end_conference_on_exit is not None:
+        data["EndConferenceOnExit"] = str(end_conference_on_exit).lower()
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         resp = await client.post(url, data=data, headers=_auth_header())
@@ -71,6 +82,48 @@ async def create_participant(
         return result
 
 
+async def update_call_url(call_sid: str, twiml_url: str, method: str = "POST") -> Dict[str, Any]:
+    """Redirect an active call leg to a new TwiML URL."""
+    url = f"{_account_url()}/Calls/{call_sid}.json"
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.post(
+            url,
+            data={"Url": twiml_url, "Method": method},
+            headers=_auth_header(),
+        )
+        if not resp.is_success:
+            logger.error("Twilio redirect error %s for %s: %s", resp.status_code, call_sid, resp.text)
+        resp.raise_for_status()
+        return resp.json()
+
+
+async def complete_call(call_sid: str) -> Dict[str, Any]:
+    """Hang up one call leg without explicitly ending its conference."""
+    url = f"{_account_url()}/Calls/{call_sid}.json"
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.post(url, data={"Status": "completed"}, headers=_auth_header())
+        if not resp.is_success:
+            logger.error("Twilio complete call error %s for %s: %s", resp.status_code, call_sid, resp.text)
+        resp.raise_for_status()
+        return resp.json()
+
+
+async def find_conferences_by_friendly_name(
+    friendly_name: str,
+    status: str = "in-progress",
+) -> List[Dict[str, Any]]:
+    """Return conferences matching a friendly name."""
+    url = f"{_account_url()}/Conferences.json"
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.get(
+            url,
+            params={"FriendlyName": friendly_name, "Status": status},
+            headers=_auth_header(),
+        )
+        resp.raise_for_status()
+        return resp.json().get("conferences", [])
+
+
 async def update_participant(
     conference_sid: str,
     call_sid: str,
@@ -79,33 +132,22 @@ async def update_participant(
     hold: Optional[bool] = None,
     hold_url: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Update a participant (mute/unmute/hold/unhold).
-
-    Mute: POST to Calls resource (Participants Muted param is deprecated).
-    Hold: POST to Participants resource — HoldUrl required on both hold AND unhold.
-    """
+    """Update a conference participant (mute/unmute/hold/unhold)."""
     result = {}
-
-    # Mute/unmute via Calls resource (Participants Muted is deprecated)
+    part_url = f"{_account_url()}/Conferences/{conference_sid}/Participants/{call_sid}.json"
+    data: Dict[str, str] = {}
     if muted is not None:
-        call_url = f"{_account_url()}/Calls/{call_sid}.json"
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.post(call_url, data={"Muted": str(muted).lower()}, headers=_auth_header())
-            if not resp.is_success:
-                logger.error("Twilio mute error %s: %s", resp.status_code, resp.text)
-            resp.raise_for_status()
-            result = resp.json()
-
-    # Hold/unhold via Participants resource — HoldUrl required in both directions
+        data["Muted"] = str(muted).lower()
     if hold is not None:
-        part_url = f"{_account_url()}/Conferences/{conference_sid}/Participants/{call_sid}.json"
-        data: Dict[str, str] = {"Hold": str(hold).lower()}
+        data["Hold"] = str(hold).lower()
         # HoldUrl required whenever Hold param is present (Twilio requirement)
         data["HoldUrl"] = hold_url or "http://twimlets.com/holdmusic?Bucket=com.twilio.music.classical"
+
+    if data:
         async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.post(part_url, data=data, headers=_auth_header())
             if not resp.is_success:
-                logger.error("Twilio hold error %s: %s", resp.status_code, resp.text)
+                logger.error("Twilio participant update error %s: %s", resp.status_code, resp.text)
             resp.raise_for_status()
             result = resp.json()
 

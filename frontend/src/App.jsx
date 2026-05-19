@@ -19,6 +19,7 @@ const DEV_BYPASS = import.meta.env.VITE_DEV_BYPASS === 'true'
 const NAV_ITEMS = [
   { key: 'dashboard', label: 'Dashboard' },
   { key: 'leads', label: 'Lead Import' },
+  { key: 'calls', label: '3 Way Bridge' },
   { key: 'licenses', label: 'Licenses' },
   { key: 'team', label: 'Team' },
   { key: 'analytics', label: 'Analytics' },
@@ -26,7 +27,6 @@ const NAV_ITEMS = [
   { key: 'campaigns', label: 'Campaigns' },
   { key: 'research', label: 'Research' },
   { key: 'sms-templates', label: 'SMS Templates' },
-  { key: 'calls', label: 'Call Management' },
   { key: 'settings', label: 'Settings' },
 ]
 

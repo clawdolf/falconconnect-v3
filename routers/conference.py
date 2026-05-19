@@ -3,10 +3,13 @@
 Endpoints for starting/managing conferences, TwiML webhooks, and caller ID verification.
 """
 
+import base64
+import hashlib
+import hmac
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,6 +19,7 @@ from sqlalchemy import select
 from db.database import get_session
 from db.models import ConferenceSession
 from middleware.auth import require_auth
+from config import get_settings
 from services import conference as conf_service
 from services import twilio_client
 from utils.rate_limit import limiter, user_or_ip_key
@@ -48,6 +52,27 @@ class StartConferenceRequest(BaseModel):
     carrier_phone: str
     seb_close_number: str
     lead_id: Optional[str] = None
+
+
+class StartBridgeRequest(BaseModel):
+    lead_phone: str
+    lead_id: Optional[str] = None
+
+
+class StartBridgeResponse(BaseModel):
+    conf_id: str
+    status: str
+    lead_phone: str
+    lead_id: str
+    bridge_number: str
+    seb_phone: str
+    conference_name: str
+    transfer_instructions: str
+
+
+class CarrierRequest(BaseModel):
+    carrier_phone: str
+    carrier_label: str = "Carrier"
 
 
 class DialCarrierRequest(BaseModel):
@@ -114,7 +139,7 @@ async def start_conference(
             session=session,
             lead_phone=req.lead_phone,
             carrier_phone=req.carrier_phone,
-            seb_close_number="+14809999040",  # Always Seb's Close main line — hardcoded so Close records inbound leg
+            seb_close_number=req.seb_close_number,
             user_id=user.get("user_id") or user.get("sub"),
             lead_id=req.lead_id,
             base_url=base_url,
@@ -122,6 +147,29 @@ async def start_conference(
         return result
     except Exception as e:
         logger.error("Failed to start conference: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/conference/bridge/start", response_model=StartBridgeResponse)
+@limiter.limit("10/hour;50/day", key_func=user_or_ip_key)
+async def start_bridge_session(
+    req: StartBridgeRequest,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    user=Depends(require_auth),
+):
+    """Create a pending 3 Way Bridge transfer session. Does not dial the lead."""
+    try:
+        return await conf_service.start_bridge_session(
+            session=session,
+            lead_phone=req.lead_phone,
+            lead_id=req.lead_id,
+            user_id=user.get("user_id") or user.get("sub"),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error("Failed to create bridge session: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -163,6 +211,55 @@ async def dial_carrier(
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         logger.error("Failed to dial carrier: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/conference/{conf_id}/upgrade")
+async def upgrade_conference(
+    conf_id: str,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    user=Depends(require_auth),
+):
+    """Redirect the Close child leg into conference first."""
+    await _assert_conf_ownership(session, conf_id, user)
+    base_url = _get_public_url(request)
+    try:
+        return await conf_service.upgrade_to_conference(
+            session=session,
+            conf_id=conf_id,
+            base_url=base_url,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except Exception as e:
+        logger.error("Failed to upgrade conference: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/conference/{conf_id}/carrier")
+async def add_carrier(
+    conf_id: str,
+    req: CarrierRequest,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    user=Depends(require_auth),
+):
+    """Add the carrier as the third conference participant."""
+    await _assert_conf_ownership(session, conf_id, user)
+    base_url = _get_public_url(request)
+    try:
+        return await conf_service.add_carrier(
+            session=session,
+            conf_id=conf_id,
+            carrier_phone=req.carrier_phone,
+            carrier_label=req.carrier_label,
+            base_url=base_url,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error("Failed to add carrier: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -240,6 +337,22 @@ async def unhold_participant(
     _validate_participant(participant)
     try:
         return await conf_service.unhold_participant(session, conf_id, participant)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.post("/conference/{conf_id}/drop/{participant}")
+async def drop_participant(
+    conf_id: str,
+    participant: str,
+    session: AsyncSession = Depends(get_session),
+    user=Depends(require_auth),
+):
+    """Drop one participant call leg without ending the whole conference."""
+    await _assert_conf_ownership(session, conf_id, user)
+    _validate_participant(participant)
+    try:
+        return await conf_service.drop_participant(session, conf_id, participant)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
@@ -341,6 +454,66 @@ async def list_caller_ids(
 # ── TwiML Webhooks (no auth — Twilio calls these) ──
 
 
+@router.post("/conference/twiml/bridge-inbound")
+async def twiml_bridge_inbound(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+):
+    """Inbound Twilio bridge webhook for the transferred Close lead call."""
+    form = await _twilio_form(request)
+    from_phone = form.get("From") or request.query_params.get("From", "")
+    parent_call_sid = form.get("CallSid") or request.query_params.get("CallSid", "")
+    base_url = _get_public_url(request)
+    try:
+        _, twiml = await conf_service.handle_bridge_inbound(
+            session=session,
+            from_phone=from_phone,
+            parent_call_sid=parent_call_sid,
+            base_url=base_url,
+        )
+    except Exception as e:
+        logger.error("Bridge inbound failed: %s", e)
+        twiml = """<?xml version="1.0" encoding="UTF-8"?><Response><Say>Bridge unavailable.</Say></Response>"""
+    return Response(content=twiml, media_type="application/xml")
+
+
+@router.post("/conference/twiml/number-status")
+async def twiml_number_status(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+):
+    """Track the Close child call leg generated by inbound Dial Number."""
+    form = await _twilio_form(request)
+    await conf_service.handle_number_status(
+        session=session,
+        conf_id=request.query_params.get("conf_id", ""),
+        call_sid=form.get("CallSid") or "",
+        parent_call_sid=form.get("ParentCallSid") or "",
+        call_status=form.get("CallStatus") or "",
+    )
+    return {"status": "ok"}
+
+
+@router.post("/conference/twiml/dial-ended")
+async def twiml_dial_ended(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+):
+    """Dial action callback. Moves the lead parent leg into conference after upgrade."""
+    await _twilio_form(request)
+    conf_id = request.query_params.get("conf_id", "")
+    conf = await conf_service.should_join_lead_after_dial(session=session, conf_id=conf_id)
+    if not conf:
+        return Response(content='<?xml version="1.0" encoding="UTF-8"?><Response></Response>', media_type="application/xml")
+    twiml = conf_service.conference_twiml(
+        conference_name=conf.conference_sid,
+        conf_id=str(conf.id),
+        label="lead",
+        base_url=_get_public_url(request),
+    )
+    return Response(content=twiml, media_type="application/xml")
+
+
 @router.post("/conference/twiml/conference")
 async def twiml_conference(request: Request):
     """TwiML endpoint — tells a participant to join the conference.
@@ -348,24 +521,17 @@ async def twiml_conference(request: Request):
     Twilio calls this URL when a participant answers.
     Returns TwiML XML that joins them to the named conference.
     """
+    await _twilio_form(request)
     conference_name = request.query_params.get("conference_name", "fc-bridge-default")
     conf_id = request.query_params.get("conf_id", "")
+    label = request.query_params.get("label", "lead")
 
-    # Generate TwiML response — statusCallback MUST be absolute URL, Twilio won't follow relative paths
-    public_base = "https://falconconnect.onrender.com"
-    twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-    <Dial>
-        <Conference
-            statusCallback="{public_base}/api/conference/twiml/status?conf_id={conf_id}"
-            statusCallbackEvent="start end join leave mute hold"
-            record="record-from-start"
-            waitUrl="http://twimlets.com/holdmusic?Bucket=com.twilio.music.classical"
-            startConferenceOnEnter="true"
-            endConferenceOnExit="false"
-        >{conference_name}</Conference>
-    </Dial>
-</Response>"""
+    twiml = conf_service.conference_twiml(
+        conference_name=conference_name,
+        conf_id=conf_id,
+        label=label,
+        base_url=_get_public_url(request),
+    )
 
     return Response(content=twiml, media_type="application/xml")
 
@@ -380,10 +546,7 @@ async def twiml_status(
     No auth — Twilio sends POST form data.
     Events: participant-join, participant-leave, conference-start, conference-end
     """
-    try:
-        form = await request.form()
-    except Exception:
-        form = {}
+    form = await _twilio_form(request)
     conf_id = request.query_params.get("conf_id", "")
     event = form.get("StatusCallbackEvent", "")
     conference_sid = form.get("ConferenceSid", "")
@@ -397,10 +560,26 @@ async def twiml_status(
     # Update conference SID if we have one
     if conf_id and conference_sid:
         try:
-            await conf_service.update_conference_sid(session, conf_id, conference_sid)
+            await conf_service.update_conference_sid(session, conf_id, conference_sid, event=event, call_sid=call_sid)
         except Exception as e:
             logger.warning("Could not update conference SID: %s", e)
 
+    return {"status": "ok"}
+
+
+@router.post("/conference/twiml/recording-status")
+async def twiml_recording_status(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+):
+    """Capture recording callbacks without blocking the call flow."""
+    form = await _twilio_form(request)
+    await conf_service.capture_recording_callback(
+        session=session,
+        conf_id=request.query_params.get("conf_id", ""),
+        recording_sid=form.get("RecordingSid") or "",
+        recording_url=form.get("RecordingUrl") or "",
+    )
     return {"status": "ok"}
 
 
@@ -413,6 +592,39 @@ def _validate_participant(participant: str) -> None:
             status_code=400,
             detail=f"Invalid participant '{participant}'. Must be seb, lead, or carrier.",
         )
+
+
+async def _twilio_form(request: Request) -> dict:
+    """Return Twilio form data after validating X-Twilio-Signature."""
+    try:
+        form = dict(await request.form())
+    except Exception:
+        form = {}
+    _require_twilio_signature(request, form)
+    return form
+
+
+def _require_twilio_signature(request: Request, form: dict) -> None:
+    """Validate Twilio's request signature before call-control side effects."""
+    token = get_settings().twilio_auth_token
+    signature = request.headers.get("X-Twilio-Signature", "")
+    if not token:
+        logger.error("TWILIO_AUTH_TOKEN is missing; refusing unauthenticated Twilio webhook")
+        raise HTTPException(status_code=500, detail="Twilio webhook validation is not configured")
+    if not signature:
+        raise HTTPException(status_code=403, detail="Missing Twilio signature")
+
+    query = request.url.query
+    url = f"{_get_public_url(request)}{request.url.path}"
+    if query:
+        url = f"{url}?{query}"
+    signed = url + "".join(f"{key}{value}" for key, value in sorted(form.items()))
+    expected = base64.b64encode(
+        hmac.new(token.encode("utf-8"), signed.encode("utf-8"), hashlib.sha1).digest()
+    ).decode("ascii")
+    if not hmac.compare_digest(expected, signature):
+        logger.warning("Rejected invalid Twilio signature for %s", request.url.path)
+        raise HTTPException(status_code=403, detail="Invalid Twilio signature")
 
 
 def _get_public_url(request: Request) -> str:

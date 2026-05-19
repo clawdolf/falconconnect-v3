@@ -1,694 +1,411 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 const API = '/api'
+const BRIDGE_DISPLAY = 'Bridge number loads after session creation'
+const FAVORITE_CARRIERS = [
+  { label: 'Test Carrier 914', phone: '' },
+  { label: 'Mutual of Omaha UW', phone: '' },
+  { label: 'Manual number', phone: '' },
+]
 
 function CallManagement() {
-  const [tab, setTab] = useState('conference') // conference | callerid | history
-  const [callerIds, setCallerIds] = useState([])
-  const [callerIdsLoading, setCallerIdsLoading] = useState(false)
-
-  // Conference form
   const [leadPhone, setLeadPhone] = useState('')
-  const [carrierPhone, setCarrierPhone] = useState('')
-  const [selectedNumber, setSelectedNumber] = useState('+18446813690') // FC toll-free — fixed until A2P clears
   const [leadId, setLeadId] = useState('')
-  const [starting, setStarting] = useState(false)
+  const [session, setSession] = useState(null)
+  const [status, setStatus] = useState(null)
+  const [sessions, setSessions] = useState([])
+  const [carrierChoice, setCarrierChoice] = useState(FAVORITE_CARRIERS[0].label)
+  const [carrierPhone, setCarrierPhone] = useState(FAVORITE_CARRIERS[0].phone)
+  const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
-
-  // Active conference
-  const [activeConf, setActiveConf] = useState(null)
-  const [confStatus, setConfStatus] = useState(null)
+  const [log, setLog] = useState([{ ts: new Date(), msg: 'Cockpit ready.' }])
   const pollRef = useRef(null)
 
-  // History
-  const [sessions, setSessions] = useState([])
-  const [sessionsLoading, setSessionsLoading] = useState(false)
-
-  // Caller ID verification
-  const [verifying, setVerifying] = useState(null) // phone number being verified
-  const [verifyCode, setVerifyCode] = useState('')
-  const [verifyMsg, setVerifyMsg] = useState('')
-
-  const token = () => {
-    try {
-      return window.__clerk_session?.getToken?.() || ''
-    } catch { return '' }
-  }
-
   const authHeaders = useCallback(() => {
-    const t = document.cookie.match(/__session=([^;]+)/)?.[1] || ''
+    const token = document.cookie.match(/__session=([^;]+)/)?.[1] || ''
     return {
       'Content-Type': 'application/json',
-      ...(t ? { 'Authorization': `Bearer ${t}` } : {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
     }
   }, [])
 
-  // Load caller IDs on mount
-  useEffect(() => {
-    loadCallerIds()
+  const active = status || session
+  const confId = active?.conf_id
+  const currentStatus = active?.status || 'idle'
+  const bridgeNumber = active?.bridge_number || BRIDGE_DISPLAY
+
+  const canUpgrade = currentStatus === 'close_connected'
+  const conferenceLive = ['conference_live', 'carrier_connected', 'dialing_carrier', 'upgrade_pending'].includes(currentStatus)
+
+  const addLog = useCallback((msg) => {
+    setLog((prev) => [{ ts: new Date(), msg }, ...prev].slice(0, 80))
   }, [])
 
-  async function loadCallerIds() {
-    setCallerIdsLoading(true)
+  const refreshStatus = useCallback(async (silent = false) => {
+    if (!confId) return
     try {
-      const res = await fetch(`${API}/conference/caller-id/list`, { headers: authHeaders() })
-      if (res.ok) {
-        const data = await res.json()
-        setCallerIds(data.numbers || [])
-        // Auto-select first verified number
-        const firstVerified = (data.numbers || []).find(n => n.verified)
-        if (firstVerified && !selectedNumber) {
-          setSelectedNumber(firstVerified.phone_number)
-        }
-      }
-    } catch (e) {
-      console.error('Failed to load caller IDs:', e)
-    } finally {
-      setCallerIdsLoading(false)
-    }
-  }
-
-  // Poll conference status
-  useEffect(() => {
-    if (activeConf && activeConf.status !== 'ended') {
-      pollRef.current = setInterval(async () => {
-        try {
-          const res = await fetch(`${API}/conference/${activeConf.conf_id}`, { headers: authHeaders() })
-          if (res.ok) {
-            const data = await res.json()
-            setConfStatus(data)
-            if (data.status === 'ended') {
-              clearInterval(pollRef.current)
-              setActiveConf(null)
-            }
-          }
-        } catch (e) {
-          console.error('Poll error:', e)
-        }
-      }, 2000)
-      return () => clearInterval(pollRef.current)
-    }
-  }, [activeConf])
-
-  async function startConference(e) {
-    e.preventDefault()
-    setError('')
-    setStarting(true)
-    try {
-      const res = await fetch(`${API}/conference/start`, {
-        method: 'POST',
-        headers: authHeaders(),
-        body: JSON.stringify({
-          lead_phone: leadPhone,
-          carrier_phone: carrierPhone,
-          seb_close_number: selectedNumber,
-          lead_id: leadId || null,
-        }),
-      })
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}))
-        throw new Error(err.detail || `HTTP ${res.status}`)
-      }
+      const res = await fetch(`${API}/conference/${confId}`, { headers: authHeaders() })
+      if (!res.ok) throw new Error(`Status refresh failed (${res.status})`)
       const data = await res.json()
-      setActiveConf(data)
-      setConfStatus(null)
-    } catch (e) {
-      setError(e.message)
-    } finally {
-      setStarting(false)
-    }
-  }
-
-  async function dialSeb() {
-    if (!activeConf) return
-    try {
-      await fetch(`${API}/conference/${activeConf.conf_id}/dial-seb`, {
-        method: 'POST',
-        headers: authHeaders(),
+      setStatus((prev) => {
+        if (prev?.status !== data.status && !silent) addLog(`Status changed: ${data.status}`)
+        return data
       })
-    } catch (e) {
-      console.error('Dial seb error:', e)
+    } catch (err) {
+      if (!silent) setError(err.message)
     }
-  }
+  }, [addLog, authHeaders, confId])
 
-  async function dialCarrier() {
-    if (!activeConf) return
-    try {
-      await fetch(`${API}/conference/${activeConf.conf_id}/dial-carrier`, {
-        method: 'POST',
-        headers: authHeaders(),
-      })
-    } catch (e) {
-      console.error('Dial carrier error:', e)
-    }
-  }
+  useEffect(() => {
+    if (!confId || currentStatus === 'ended') return undefined
+    pollRef.current = window.setInterval(() => refreshStatus(true), 2000)
+    return () => window.clearInterval(pollRef.current)
+  }, [confId, currentStatus, refreshStatus])
 
-  async function conferenceAction(action, participant) {
-    if (!activeConf) return
-    try {
-      await fetch(`${API}/conference/${activeConf.conf_id}/${action}/${participant}`, {
-        method: 'POST',
-        headers: authHeaders(),
-      })
-    } catch (e) {
-      console.error(`${action} ${participant} error:`, e)
-    }
-  }
-
-  async function endConference() {
-    if (!activeConf) return
-    try {
-      await fetch(`${API}/conference/${activeConf.conf_id}/end`, {
-        method: 'POST',
-        headers: authHeaders(),
-      })
-      clearInterval(pollRef.current)
-      setActiveConf(null)
-      setConfStatus(null)
-    } catch (e) {
-      console.error('End conference error:', e)
-    }
-  }
+  useEffect(() => {
+    loadSessions()
+  }, [])
 
   async function loadSessions() {
-    setSessionsLoading(true)
     try {
       const res = await fetch(`${API}/conference/sessions`, { headers: authHeaders() })
-      if (res.ok) {
-        const data = await res.json()
-        setSessions(data)
+      if (res.ok) setSessions(await res.json())
+    } catch {
+      // Recent sessions are non-critical for the live cockpit.
+    }
+  }
+
+  async function createSession(event) {
+    event.preventDefault()
+    setBusy('create')
+    setError('')
+    try {
+      const res = await fetch(`${API}/conference/bridge/start`, {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({ lead_phone: leadPhone, lead_id: leadId || null }),
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(body.detail || `Create failed (${res.status})`)
       }
-    } catch (e) {
-      console.error('Load sessions error:', e)
+      const data = await res.json()
+      setSession(data)
+      setStatus(data)
+      addLog(`Transfer session created for ${data.lead_phone}.`)
+    } catch (err) {
+      setError(err.message)
     } finally {
-      setSessionsLoading(false)
+      setBusy('')
     }
   }
 
-  async function initiateVerify(phoneNumber) {
-    setVerifying(phoneNumber)
-    setVerifyCode('')
-    setVerifyMsg('')
+  async function postAction(path, label) {
+    if (!confId) return
+    setBusy(label)
+    setError('')
     try {
-      const res = await fetch(`${API}/conference/caller-id/verify`, {
+      const res = await fetch(`${API}/conference/${confId}/${path}`, {
         method: 'POST',
         headers: authHeaders(),
-        body: JSON.stringify({ phone_number: phoneNumber }),
       })
-      if (res.ok) {
-        const data = await res.json()
-        setVerifyMsg(`Twilio is calling ${phoneNumber}. Listen for the 6-digit code.`)
-        // In test mode, Twilio returns the code directly
-        if (data.validation_code) {
-          setVerifyMsg(`Verification code: ${data.validation_code}`)
-        }
-      } else {
-        const err = await res.json().catch(() => ({}))
-        setVerifyMsg(`Error: ${err.detail || 'Verification failed'}`)
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(body.detail || `${label} failed (${res.status})`)
       }
-    } catch (e) {
-      setVerifyMsg(`Error: ${e.message}`)
+      addLog(label)
+      await refreshStatus(true)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusy('')
     }
   }
 
-  async function confirmVerify() {
-    if (!verifying) return
+  async function addCarrier() {
+    if (!confId) return
+    setBusy('carrier')
+    setError('')
     try {
-      const res = await fetch(`${API}/conference/caller-id/confirm`, {
+      const res = await fetch(`${API}/conference/${confId}/carrier`, {
         method: 'POST',
         headers: authHeaders(),
-        body: JSON.stringify({ phone_number: verifying, code: verifyCode }),
+        body: JSON.stringify({ carrier_phone: carrierPhone, carrier_label: carrierChoice }),
       })
-      if (res.ok) {
-        const data = await res.json()
-        if (data.verified) {
-          setVerifyMsg('Number verified.')
-          setVerifying(null)
-          loadCallerIds()
-        } else {
-          setVerifyMsg('Not yet verified. The code is entered during the Twilio call, not here. Wait for the call and enter the code when prompted.')
-        }
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(body.detail || `Carrier failed (${res.status})`)
       }
-    } catch (e) {
-      setVerifyMsg(`Error: ${e.message}`)
+      const data = await res.json()
+      addLog(`Carrier dial started: ${data.carrier_phone}.`)
+      await refreshStatus(true)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusy('')
     }
   }
 
-  function formatPhone(num) {
-    if (!num) return ''
-    const d = num.replace(/\D/g, '')
-    if (d.length === 11 && d[0] === '1') {
-      return `(${d.slice(1,4)}) ${d.slice(4,7)}-${d.slice(7)}`
+  async function participantAction(action, participant) {
+    if (action === 'drop' && participant !== 'carrier') {
+      const label = participant === 'lead' ? 'client' : 'Seb'
+      if (!window.confirm(`Drop ${label} from this bridge?`)) return
     }
-    return num
+    await postAction(`${action}/${participant}`, `${action} ${participant}`)
   }
 
-  function participantStatusColor(status) {
-    if (!status) return 'c-amber'
-    switch (status) {
-      case 'in-progress': return 'c-green'
-      case 'completed': return 'c-red'
-      case 'ringing': return 'c-amber'
-      case 'queued': return 'c-amber'
-      case 'no-answer': return 'c-red'
-      case 'busy': return 'c-red'
-      case 'failed': return 'c-red'
-      default: return 'c-amber'
-    }
+  function selectCarrier(label) {
+    setCarrierChoice(label)
+    const found = FAVORITE_CARRIERS.find((carrier) => carrier.label === label)
+    setCarrierPhone(found?.phone || '')
   }
 
-  function participantStatusLabel(p) {
-    if (!p) return 'Not Connected'
-    if (p.hold) return 'On Hold'
-    if (p.muted) return 'Muted'
-    if (p.status === 'in-progress') return 'Connected'
-    if (p.status === 'completed') return 'Disconnected'
-    if (p.status === 'ringing') return 'Ringing...'
-    if (p.status === 'queued') return 'Queued'
-    if (p.status === 'no-answer') return 'No Answer'
-    return p.status || 'Unknown'
-  }
-
-  const verifiedNumbers = callerIds.filter(n => n.verified)
+  const participants = useMemo(() => ([
+    { key: 'lead', title: 'Client / Lead', phone: active?.lead_phone, data: active?.participants?.lead },
+    { key: 'seb', title: 'Seb / Close', phone: active?.seb_phone, data: active?.participants?.seb },
+    { key: 'carrier', title: 'Carrier', phone: active?.carrier_phone || carrierPhone, data: active?.participants?.carrier },
+  ]), [active, carrierPhone])
 
   return (
-    <div className="call-management">
-      {/* Tab navigation */}
-      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.5rem' }}>
-        {[
-          { key: 'conference', label: 'Conference Bridge' },
-          { key: 'history', label: 'Recent Sessions' },
-        ].map(t => (
-          <button
-            key={t.key}
-            onClick={() => {
-              setTab(t.key)
-              if (t.key === 'history') loadSessions()
-            }}
-            style={{
-              padding: '0.4rem 0.75rem',
-              background: tab === t.key ? 'var(--accent)' : 'var(--surface)',
-              color: tab === t.key ? 'oklch(15% 0.01 85)' : 'var(--text-muted)',
-              border: `1px solid ${tab === t.key ? 'var(--accent)' : 'var(--border)'}`,
-              borderRadius: 2,
-              fontFamily: 'var(--font-mono)',
-              fontSize: '0.72rem',
-              fontWeight: tab === t.key ? 600 : 400,
-              letterSpacing: '0.04em',
-              cursor: 'pointer',
-              textTransform: 'uppercase',
-            }}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
+    <div style={styles.page}>
+      <header style={styles.header}>
+        <div>
+          <h1 style={styles.title}>3 Way Bridge</h1>
+          <p style={styles.subtitle}>Close owns the lead. Twilio owns the call physics.</p>
+        </div>
+        <div style={styles.statusStrip}>
+          {statusBadges(currentStatus).map((badge) => (
+            <span key={badge.label} style={{ ...styles.badge, color: badge.active ? badge.color : 'var(--text-muted)', borderColor: badge.active ? badge.color : 'var(--border)' }}>
+              {badge.label}
+            </span>
+          ))}
+        </div>
+      </header>
 
-      {/* ── Conference Bridge Tab ── */}
-      {tab === 'conference' && (
-        <>
-          {!activeConf ? (
-            <section className="section">
-              <h2 className="section-title">Start Conference Bridge</h2>
-              <form onSubmit={startConference} style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxWidth: 480 }}>
-                <div>
-                  <label className="form-label">Lead Phone Number</label>
-                  <input
-                    className="custom-signin-input"
-                    type="tel"
-                    placeholder="+1 (555) 123-4567"
-                    value={leadPhone}
-                    onChange={e => setLeadPhone(e.target.value)}
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="form-label">Carrier Phone Number</label>
-                  <input
-                    className="custom-signin-input"
-                    type="tel"
-                    placeholder="+1 (800) 555-0100"
-                    value={carrierPhone}
-                    onChange={e => setCarrierPhone(e.target.value)}
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="form-label">Caller ID</label>
-                  <div className="custom-signin-input" style={{ opacity: 0.6, cursor: 'default', userSelect: 'none' }}>
-                    +1 (844) 681-3690 — FC toll-free
-                  </div>
-                </div>
-                <div>
-                  <label className="form-label">Close Lead ID (optional)</label>
-                  <input
-                    className="custom-signin-input"
-                    type="text"
-                    placeholder="lead_abc123..."
-                    value={leadId}
-                    onChange={e => setLeadId(e.target.value)}
-                  />
-                </div>
-                {error && (
-                  <p style={{ fontFamily: 'var(--font-mono)', fontSize: '0.7rem', color: 'var(--red)' }}>{error}</p>
-                )}
-                <button
-                  type="submit"
-                  disabled={starting || !leadPhone || !carrierPhone}
-                  style={{
-                    padding: '0.6rem 1.25rem',
-                    background: 'var(--accent)',
-                    color: 'oklch(15% 0.01 85)',
-                    border: '1px solid var(--accent)',
-                    borderRadius: 2,
-                    fontFamily: 'var(--font-mono)',
-                    fontSize: '0.8rem',
-                    fontWeight: 600,
-                    letterSpacing: '0.06em',
-                    textTransform: 'uppercase',
-                    cursor: starting ? 'not-allowed' : 'pointer',
-                    opacity: starting ? 0.6 : 1,
-                    marginTop: '0.25rem',
-                  }}
-                >
-                  {starting ? 'STARTING...' : 'START CONFERENCE'}
-                </button>
-              </form>
-            </section>
-          ) : (
-            <section className="section">
-              <h2 className="section-title">Active Conference</h2>
-              <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
-                {/* Participant cards */}
-                {['seb', 'lead', 'carrier'].map(role => {
-                  const p = confStatus?.participants?.[role]
-                  const label = role === 'seb' ? 'Seb' : role === 'lead' ? 'Lead' : 'Carrier'
-                  const phone = role === 'seb' ? confStatus?.seb_phone
-                    : role === 'lead' ? confStatus?.lead_phone
-                    : confStatus?.carrier_phone
+      <section style={styles.section}>
+        <div style={styles.sectionHead}>
+          <h2 style={styles.sectionTitle}>Live Workflow</h2>
+          {confId && <span style={styles.monoMuted}>Session {confId.slice(0, 8)}</span>}
+        </div>
 
-                  return (
-                    <div key={role} style={{
-                      flex: '1 1 200px',
-                      background: 'var(--surface)',
-                      border: '1px solid var(--border)',
-                      borderRadius: 2,
-                      padding: '1rem',
-                    }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
-                        <span style={{
-                          width: 8, height: 8, borderRadius: '50%',
-                          background: p?.status === 'in-progress' ? 'var(--green)' :
-                            p?.status === 'ringing' ? 'var(--amber)' :
-                            p?.status === 'completed' || p?.status === 'no-answer' ? 'var(--red)' :
-                            'var(--text-muted)',
-                          flexShrink: 0,
-                        }} />
-                        <span style={{ fontFamily: 'var(--font-display)', fontSize: '0.85rem', fontWeight: 600 }}>{label}</span>
-                      </div>
-                      <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.68rem', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>
-                        {formatPhone(phone) || 'Not dialed'}
-                      </div>
-                      <div style={{
-                        fontFamily: 'var(--font-mono)', fontSize: '0.65rem',
-                        color: p?.hold ? 'var(--amber)' : p?.muted ? 'var(--amber)' : p?.status === 'in-progress' ? 'var(--green)' : 'var(--text-muted)',
-                        marginBottom: '0.75rem',
-                      }}>
-                        {participantStatusLabel(p)}
-                      </div>
-
-                      {/* Controls */}
-                      <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
-                        {p?.muted ? (
-                          <ControlBtn label="Unmute" onClick={() => conferenceAction('unmute', role)} />
-                        ) : (
-                          <ControlBtn label="Mute" onClick={() => conferenceAction('mute', role)} />
-                        )}
-                        {p?.hold ? (
-                          <ControlBtn label="Unhold" onClick={() => conferenceAction('unhold', role)} />
-                        ) : (
-                          <ControlBtn label="Hold" onClick={() => conferenceAction('hold', role)} />
-                        )}
-                      </div>
-
-                      {/* Dial Close button — Seb joins conference on demand */}
-                      {role === 'seb' && !p?.call_sid && (
-                        <button
-                          onClick={dialSeb}
-                          style={{
-                            marginTop: '0.5rem',
-                            padding: '0.35rem 0.7rem',
-                            background: 'var(--accent)',
-                            color: 'oklch(15% 0.01 85)',
-                            border: 'none',
-                            borderRadius: 2,
-                            fontFamily: 'var(--font-mono)',
-                            fontSize: '0.65rem',
-                            fontWeight: 600,
-                            cursor: 'pointer',
-                            textTransform: 'uppercase',
-                            letterSpacing: '0.04em',
-                          }}
-                        >
-                          Dial Close
-                        </button>
-                      )}
-
-                      {/* Dial Carrier button */}
-                      {role === 'carrier' && !p?.call_sid && (
-                        <button
-                          onClick={dialCarrier}
-                          style={{
-                            marginTop: '0.5rem',
-                            padding: '0.35rem 0.7rem',
-                            background: 'var(--green)',
-                            color: 'oklch(15% 0.01 145)',
-                            border: 'none',
-                            borderRadius: 2,
-                            fontFamily: 'var(--font-mono)',
-                            fontSize: '0.65rem',
-                            fontWeight: 600,
-                            cursor: 'pointer',
-                            textTransform: 'uppercase',
-                            letterSpacing: '0.04em',
-                          }}
-                        >
-                          Dial Carrier
-                        </button>
-                      )}
-                    </div>
-                  )
-                })}
-              </div>
-
-              {/* Conference info bar */}
-              <div style={{
-                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                background: 'var(--surface)', border: '1px solid var(--border)',
-                borderRadius: 2, padding: '0.5rem 1rem', marginBottom: '0.75rem',
-              }}>
-                <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.65rem', color: 'var(--text-muted)' }}>
-                  Status: <span style={{ color: confStatus?.status === 'active' ? 'var(--green)' : 'var(--text)' }}>{confStatus?.status || activeConf.status}</span>
-                </div>
-                <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.65rem', color: 'var(--text-muted)' }}>
-                  {confStatus?.conference_sid ? `SID: ${confStatus.conference_sid.slice(0, 20)}...` : ''}
-                </div>
-              </div>
-
-              <button
-                onClick={endConference}
-                style={{
-                  padding: '0.5rem 1rem',
-                  background: 'var(--red)',
-                  color: 'var(--text)',
-                  border: 'none',
-                  borderRadius: 2,
-                  fontFamily: 'var(--font-mono)',
-                  fontSize: '0.75rem',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.06em',
-                }}
-              >
-                End Conference
+        {!confId ? (
+          <form onSubmit={createSession} style={styles.formGrid}>
+            <Field label="Lead phone number">
+              <input style={styles.input} type="tel" value={leadPhone} onChange={(e) => setLeadPhone(e.target.value)} placeholder="+14804897756" required />
+            </Field>
+            <Field label="Close lead id optional">
+              <input style={styles.input} type="text" value={leadId} onChange={(e) => setLeadId(e.target.value)} placeholder="lead_..." />
+            </Field>
+            <button style={styles.primaryButton} disabled={busy === 'create' || !leadPhone}>
+              {busy === 'create' ? 'Creating...' : 'Create Transfer Session'}
+            </button>
+          </form>
+        ) : (
+          <div style={styles.workflowGrid}>
+            <div style={styles.transferBox}>
+              <span style={styles.kicker}>Transfer active Close call to</span>
+              <strong style={styles.bridgeNumber}>{formatPhone(bridgeNumber)}</strong>
+            </div>
+            <button type="button" style={styles.secondaryButton} onClick={() => refreshStatus(false)}>Refresh Status</button>
+            {canUpgrade && (
+              <button type="button" style={styles.primaryButton} disabled={busy === 'Upgrade to conference'} onClick={() => postAction('upgrade', 'Upgrade to conference')}>
+                Upgrade to Conference
               </button>
-            </section>
-          )}
-        </>
-      )}
+            )}
+          </div>
+        )}
+        {error && <p style={styles.error}>{error}</p>}
+      </section>
 
-      {/* ── Caller ID Verification Tab ── */}
-      {tab === 'callerid' && (
-        <section className="section">
-          <h2 className="section-title">Caller ID Verification</h2>
-          <p style={{ fontFamily: 'var(--font-mono)', fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: '1rem', lineHeight: 1.6 }}>
-            Verify your Close numbers so FC can use them as caller ID when dialing. 
-            Click Verify — Twilio calls the number and plays a 6-digit code. Enter the code when prompted.
-          </p>
-
-          {callerIdsLoading ? (
-            <p className="loading-text">Loading numbers...</p>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-              {callerIds.map(n => (
-                <div key={n.phone_number} style={{
-                  display: 'flex', alignItems: 'center', gap: '0.75rem',
-                  background: 'var(--surface)', border: '1px solid var(--border)',
-                  borderRadius: 2, padding: '0.5rem 0.75rem',
-                }}>
-                  <span style={{
-                    width: 8, height: 8, borderRadius: '50%',
-                    background: n.verified ? 'var(--green)' : 'var(--red)',
-                    flexShrink: 0,
-                  }} />
-                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.75rem', flex: 1 }}>
-                    {formatPhone(n.phone_number)}
-                  </span>
-                  <span style={{
-                    fontFamily: 'var(--font-mono)', fontSize: '0.6rem',
-                    color: n.verified ? 'var(--green)' : 'var(--text-muted)',
-                    textTransform: 'uppercase', letterSpacing: '0.04em',
-                    minWidth: 70,
-                  }}>
-                    {n.verified ? 'Verified' : 'Unverified'}
-                  </span>
-                  {!n.verified && (
-                    <button
-                      onClick={() => initiateVerify(n.phone_number)}
-                      disabled={verifying === n.phone_number}
-                      style={{
-                        padding: '0.25rem 0.5rem',
-                        background: 'var(--accent)',
-                        color: 'oklch(15% 0.01 85)',
-                        border: 'none',
-                        borderRadius: 2,
-                        fontFamily: 'var(--font-mono)',
-                        fontSize: '0.6rem',
-                        fontWeight: 600,
-                        cursor: 'pointer',
-                        textTransform: 'uppercase',
-                        letterSpacing: '0.04em',
-                        opacity: verifying === n.phone_number ? 0.6 : 1,
-                      }}
-                    >
-                      {verifying === n.phone_number ? 'Calling...' : 'Verify'}
-                    </button>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Verification modal/message */}
-          {verifying && verifyMsg && (
-            <div style={{
-              marginTop: '1rem', padding: '0.75rem',
-              background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 2,
-            }}>
-              <p style={{ fontFamily: 'var(--font-mono)', fontSize: '0.7rem', color: 'var(--text)', marginBottom: '0.5rem' }}>
-                {verifyMsg}
-              </p>
-              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                <button
-                  onClick={() => { setVerifying(null); setVerifyMsg(''); loadCallerIds() }}
-                  style={{
-                    padding: '0.3rem 0.6rem',
-                    background: 'var(--surface-hover)',
-                    color: 'var(--text-muted)',
-                    border: '1px solid var(--border)',
-                    borderRadius: 2,
-                    fontFamily: 'var(--font-mono)',
-                    fontSize: '0.65rem',
-                    cursor: 'pointer',
-                  }}
-                >
-                  Done / Refresh
-                </button>
-              </div>
-            </div>
-          )}
+      {conferenceLive && (
+        <section style={styles.section}>
+          <div style={styles.sectionHead}>
+            <h2 style={styles.sectionTitle}>Carrier</h2>
+            <span style={styles.monoMuted}>Outbound caller ID stays on bridge number</span>
+          </div>
+          <div style={styles.carrierGrid}>
+            <Field label="Favorite carrier">
+              <select style={styles.input} value={carrierChoice} onChange={(e) => selectCarrier(e.target.value)}>
+                {FAVORITE_CARRIERS.map((carrier) => <option key={carrier.label}>{carrier.label}</option>)}
+              </select>
+            </Field>
+            <Field label="Carrier phone">
+              <input style={styles.input} type="tel" value={carrierPhone} onChange={(e) => setCarrierPhone(e.target.value)} placeholder="+1..." />
+            </Field>
+            <button type="button" style={styles.primaryButton} disabled={busy === 'carrier' || !carrierPhone} onClick={addCarrier}>
+              Add Carrier
+            </button>
+          </div>
         </section>
       )}
 
-      {/* ── Recent Sessions Tab ── */}
-      {tab === 'history' && (
-        <section className="section">
-          <h2 className="section-title">Recent Conference Sessions</h2>
-          {sessionsLoading ? (
-            <p className="loading-text">Loading...</p>
-          ) : sessions.length === 0 ? (
-            <p style={{ fontFamily: 'var(--font-mono)', fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-              No conference sessions yet.
-            </p>
-          ) : (
-            <div style={{ overflowX: 'auto' }}>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-                {/* Header */}
-                <div style={{
-                  display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 80px 120px 60px',
-                  gap: '0.5rem', padding: '0.4rem 0.75rem',
-                  fontFamily: 'var(--font-mono)', fontSize: '0.6rem',
-                  color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em',
-                  borderBottom: '1px solid var(--border)',
-                }}>
-                  <span>Lead</span>
-                  <span>Carrier</span>
-                  <span>Seb Number</span>
-                  <span>Status</span>
-                  <span>Date</span>
-                  <span>Duration</span>
-                </div>
-                {sessions.map(s => (
-                  <div key={s.conf_id} style={{
-                    display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 80px 120px 60px',
-                    gap: '0.5rem', padding: '0.4rem 0.75rem',
-                    background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 2,
-                    fontFamily: 'var(--font-mono)', fontSize: '0.68rem',
-                  }}>
-                    <span>{formatPhone(s.lead_phone)}</span>
-                    <span>{formatPhone(s.carrier_phone)}</span>
-                    <span>{formatPhone(s.seb_phone)}</span>
-                    <span style={{
-                      color: s.status === 'active' ? 'var(--green)' : s.status === 'ended' ? 'var(--text-muted)' : 'var(--amber)',
-                    }}>{s.status}</span>
-                    <span style={{ color: 'var(--text-muted)', fontSize: '0.6rem' }}>
-                      {s.started_at ? new Date(s.started_at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''}
-                    </span>
-                    <span style={{ color: 'var(--text-muted)' }}>
-                      {s.duration_seconds != null ? `${Math.floor(s.duration_seconds / 60)}m${s.duration_seconds % 60}s` : '-'}
-                    </span>
-                  </div>
-                ))}
-              </div>
+      <section style={styles.participantGrid}>
+        {participants.map((participant) => (
+          <ParticipantCard
+            key={participant.key}
+            participant={participant}
+            onAction={participantAction}
+            disabled={!participant.data?.call_sid}
+          />
+        ))}
+      </section>
+
+      <section style={styles.section}>
+        <h2 style={styles.sectionTitle}>Activity Log</h2>
+        <div style={styles.logBox}>
+          {log.map((item, index) => (
+            <div key={`${item.ts.toISOString()}-${index}`} style={styles.logLine}>
+              <span>{item.ts.toLocaleTimeString()}</span>
+              <span>{item.msg}</span>
             </div>
-          )}
-        </section>
-      )}
+          ))}
+        </div>
+      </section>
+
+      <section style={styles.section}>
+        <div style={styles.sectionHead}>
+          <h2 style={styles.sectionTitle}>Recent Sessions</h2>
+          <button type="button" style={styles.textButton} onClick={loadSessions}>Reload</button>
+        </div>
+        <div style={styles.table}>
+          <div style={{ ...styles.row, ...styles.tableHead }}>
+            <span>Lead</span><span>Carrier</span><span>Status</span><span>Started</span>
+          </div>
+          {sessions.length === 0 ? (
+            <div style={styles.empty}>No bridge sessions yet.</div>
+          ) : sessions.map((item) => (
+            <div key={item.conf_id} style={styles.row}>
+              <span>{formatPhone(item.lead_phone)}</span>
+              <span>{formatPhone(item.carrier_phone) || '-'}</span>
+              <span>{item.status}</span>
+              <span>{item.started_at ? new Date(item.started_at).toLocaleString() : '-'}</span>
+            </div>
+          ))}
+        </div>
+      </section>
     </div>
   )
 }
 
-function ControlBtn({ label, onClick }) {
+function ParticipantCard({ participant, onAction, disabled }) {
+  const data = participant.data || {}
+  const connected = Boolean(data.call_sid)
+  const label = participant.key
   return (
-    <button
-      onClick={onClick}
-      style={{
-        padding: '0.2rem 0.45rem',
-        background: 'var(--surface-hover)',
-        color: 'var(--text-muted)',
-        border: '1px solid var(--border)',
-        borderRadius: 2,
-        fontFamily: 'var(--font-mono)',
-        fontSize: '0.6rem',
-        cursor: 'pointer',
-        textTransform: 'uppercase',
-        letterSpacing: '0.03em',
-      }}
-    >
-      {label}
-    </button>
+    <article style={styles.participantCard}>
+      <div style={styles.participantTop}>
+        <div>
+          <h3 style={styles.participantTitle}>{participant.title}</h3>
+          <p style={styles.monoMuted}>{formatPhone(participant.phone) || 'Not connected'}</p>
+        </div>
+        <span style={{ ...styles.dot, background: connected ? 'var(--green)' : 'var(--border)' }} />
+      </div>
+      <div style={styles.badgeLine}>
+        <span style={styles.smallBadge}>{statusLabel(data.status)}</span>
+        {data.muted && <span style={styles.smallBadgeWarn}>Muted</span>}
+        {data.hold && <span style={styles.smallBadgeWarn}>Held</span>}
+      </div>
+      <div style={styles.controls}>
+        <button type="button" style={styles.controlButton} disabled={disabled} onClick={() => onAction(data.muted ? 'unmute' : 'mute', label)}>
+          {data.muted ? 'Unmute' : 'Mute'}
+        </button>
+        <button type="button" style={styles.controlButton} disabled={disabled} onClick={() => onAction(data.hold ? 'unhold' : 'hold', label)}>
+          {data.hold ? 'Unhold' : 'Hold'}
+        </button>
+        <button type="button" style={label === 'carrier' ? styles.dropPrimary : styles.dropButton} disabled={disabled} onClick={() => onAction('drop', label)}>
+          Drop
+        </button>
+      </div>
+    </article>
   )
+}
+
+function Field({ label, children }) {
+  return (
+    <label style={styles.field}>
+      <span style={styles.label}>{label}</span>
+      {children}
+    </label>
+  )
+}
+
+function statusBadges(status) {
+  return [
+    { label: 'Waiting for transfer', active: status === 'waiting_for_transfer', color: 'var(--amber)' },
+    { label: 'Close connected', active: status === 'close_connected', color: 'var(--green)' },
+    { label: 'Conference live', active: ['conference_live', 'carrier_connected', 'dialing_carrier', 'upgrade_pending'].includes(status), color: 'var(--green)' },
+    { label: 'Carrier connected', active: status === 'carrier_connected', color: 'var(--green)' },
+  ]
+}
+
+function statusLabel(status) {
+  if (!status || status === 'not_connected') return 'Not connected'
+  if (status === 'known') return 'Leg captured'
+  return status.replaceAll('_', ' ')
+}
+
+function formatPhone(value) {
+  if (!value) return ''
+  const digits = value.replace(/\D/g, '')
+  if (digits.length === 11 && digits[0] === '1') {
+    return `+1 (${digits.slice(1, 4)}) ${digits.slice(4, 7)}-${digits.slice(7)}`
+  }
+  return value
+}
+
+const buttonBase = {
+  borderRadius: 2,
+  fontFamily: 'var(--font-mono)',
+  fontSize: '0.72rem',
+  fontWeight: 600,
+  letterSpacing: '0.04em',
+  textTransform: 'uppercase',
+  cursor: 'pointer',
+  padding: '0.58rem 0.8rem',
+}
+
+const styles = {
+  page: { display: 'flex', flexDirection: 'column', gap: '1rem', maxWidth: 1180 },
+  header: { display: 'flex', justifyContent: 'space-between', gap: '1rem', alignItems: 'flex-start', borderBottom: '1px solid var(--border)', paddingBottom: '1rem' },
+  title: { fontFamily: 'var(--font-display)', fontSize: '1.9rem', lineHeight: 1, letterSpacing: 0, margin: 0 },
+  subtitle: { color: 'var(--text-muted)', fontSize: '0.78rem', marginTop: '0.35rem' },
+  statusStrip: { display: 'flex', gap: '0.45rem', flexWrap: 'wrap', justifyContent: 'flex-end' },
+  badge: { border: '1px solid var(--border)', padding: '0.25rem 0.45rem', fontFamily: 'var(--font-mono)', fontSize: '0.62rem', textTransform: 'uppercase' },
+  section: { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 2, padding: '1rem' },
+  sectionHead: { display: 'flex', justifyContent: 'space-between', gap: '1rem', alignItems: 'center', marginBottom: '0.8rem' },
+  sectionTitle: { fontFamily: 'var(--font-display)', fontSize: '0.95rem', margin: 0, letterSpacing: 0 },
+  formGrid: { display: 'grid', gridTemplateColumns: 'minmax(220px, 1fr) minmax(220px, 1fr) auto', gap: '0.75rem', alignItems: 'end' },
+  workflowGrid: { display: 'grid', gridTemplateColumns: 'minmax(260px, 1fr) auto auto', gap: '0.75rem', alignItems: 'stretch' },
+  carrierGrid: { display: 'grid', gridTemplateColumns: 'minmax(220px, 280px) minmax(220px, 1fr) auto', gap: '0.75rem', alignItems: 'end' },
+  field: { display: 'flex', flexDirection: 'column', gap: '0.25rem' },
+  label: { color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: '0.66rem', textTransform: 'uppercase', letterSpacing: '0.04em' },
+  input: { width: '100%', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 2, color: 'var(--text)', fontFamily: 'var(--font-mono)', fontSize: '0.8rem', padding: '0.55rem 0.6rem' },
+  primaryButton: { ...buttonBase, background: 'var(--accent)', border: '1px solid var(--accent)', color: 'oklch(15% 0.01 85)' },
+  secondaryButton: { ...buttonBase, background: 'var(--surface-hover)', border: '1px solid var(--border)', color: 'var(--text)' },
+  textButton: { ...buttonBase, padding: '0.25rem 0.4rem', background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-muted)' },
+  error: { color: 'var(--red)', fontFamily: 'var(--font-mono)', fontSize: '0.72rem', marginTop: '0.75rem' },
+  transferBox: { border: '1px solid var(--border)', background: 'var(--bg)', padding: '0.6rem 0.75rem', display: 'flex', flexDirection: 'column', justifyContent: 'center' },
+  kicker: { color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: '0.62rem', textTransform: 'uppercase' },
+  bridgeNumber: { fontFamily: 'var(--font-display)', fontSize: '1.25rem', letterSpacing: 0 },
+  participantGrid: { display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '1rem' },
+  participantCard: { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 2, padding: '1rem', minWidth: 0 },
+  participantTop: { display: 'flex', justifyContent: 'space-between', gap: '0.75rem', marginBottom: '0.75rem' },
+  participantTitle: { fontFamily: 'var(--font-display)', fontSize: '0.92rem', margin: 0, letterSpacing: 0 },
+  monoMuted: { color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: '0.68rem', overflowWrap: 'anywhere' },
+  dot: { width: 10, height: 10, flex: '0 0 auto', marginTop: 6 },
+  badgeLine: { display: 'flex', flexWrap: 'wrap', gap: '0.35rem', minHeight: 26 },
+  smallBadge: { border: '1px solid var(--border)', color: 'var(--text-muted)', padding: '0.14rem 0.35rem', fontSize: '0.62rem', fontFamily: 'var(--font-mono)', textTransform: 'uppercase' },
+  smallBadgeWarn: { border: '1px solid var(--amber)', color: 'var(--amber)', padding: '0.14rem 0.35rem', fontSize: '0.62rem', fontFamily: 'var(--font-mono)', textTransform: 'uppercase' },
+  controls: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.4rem', marginTop: '0.75rem' },
+  controlButton: { ...buttonBase, padding: '0.38rem 0.35rem', background: 'var(--surface-hover)', border: '1px solid var(--border)', color: 'var(--text-muted)', fontSize: '0.62rem' },
+  dropButton: { ...buttonBase, padding: '0.38rem 0.35rem', background: 'transparent', border: '1px solid var(--red)', color: 'var(--red)', fontSize: '0.62rem' },
+  dropPrimary: { ...buttonBase, padding: '0.38rem 0.35rem', background: 'var(--red)', border: '1px solid var(--red)', color: 'var(--text)', fontSize: '0.62rem' },
+  logBox: { marginTop: '0.75rem', background: 'var(--bg)', border: '1px solid var(--border)', maxHeight: 180, overflow: 'auto', padding: '0.5rem' },
+  logLine: { display: 'grid', gridTemplateColumns: '92px 1fr', gap: '0.75rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: '0.66rem', lineHeight: 1.5 },
+  table: { overflowX: 'auto' },
+  row: { display: 'grid', gridTemplateColumns: '1fr 1fr 0.8fr 1.2fr', gap: '0.75rem', minWidth: 680, borderBottom: '1px solid var(--border-subtle)', padding: '0.45rem 0', fontFamily: 'var(--font-mono)', fontSize: '0.68rem' },
+  tableHead: { color: 'var(--text-muted)', textTransform: 'uppercase', fontSize: '0.6rem' },
+  empty: { color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: '0.72rem', paddingTop: '0.75rem' },
 }
 
 export default CallManagement
