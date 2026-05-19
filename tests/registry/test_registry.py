@@ -79,8 +79,15 @@ async def _session_factory():
     return async_sessionmaker(engine, expire_on_commit=False)
 
 
-def _install_report(tmp_path: Path, monkeypatch, rows: list[dict] | None = None) -> str:
-    job_id = "a" * 32
+def _install_report(
+    tmp_path: Path,
+    monkeypatch,
+    rows: list[dict] | None = None,
+    *,
+    job_id: str = "a" * 32,
+    status: str = "completed",
+    write_json: bool = True,
+) -> str:
     run_dir = tmp_path / "reports" / f"run-20260518T180000Z-{job_id[:12]}"
     run_dir.mkdir(parents=True)
     rows = rows or [
@@ -111,19 +118,62 @@ def _install_report(tmp_path: Path, monkeypatch, rows: list[dict] | None = None)
             "confidence": 0.98,
         },
     ]
-    (run_dir / "lead_hygiene_report.json").write_text(json.dumps({"rows": rows, "summary": {"total": 2}}))
+    if write_json:
+        (run_dir / "lead_hygiene_report.json").write_text(json.dumps({"rows": rows, "summary": {"total": len(rows)}}))
     rec = JobRecord(
         job_id=job_id,
-        status="completed",
-        params={},
+        status=status,
+        params={"fixture_mode": True, "include_ghl": True, "notion_csv_path": None},
         started_at=datetime.now(timezone.utc).isoformat(),
         run_dir=str(run_dir),
-        json_path=str(run_dir / "lead_hygiene_report.json"),
+        json_path=str(run_dir / "lead_hygiene_report.json") if write_json else None,
+        summary={"total": len(rows)},
     )
     (run_dir / "meta.json").write_text(json.dumps(rec.__dict__, default=str))
     monkeypatch.setattr(jobs, "REPORTS_BASE", tmp_path / "reports")
     jobs._reset_registry_for_tests()
     return job_id
+
+
+def test_lead_hygiene_reports_list_importable_without_paths(tmp_path, monkeypatch):
+    if not HAS_AIOSQLITE:
+        import pytest
+        pytest.skip("aiosqlite is not installed in this local environment")
+    monkeypatch.setenv("CLERK_ADMIN_USER_ID", "user_3ASrwDOrSTaDxCus6f1B5lnDsgz")
+    job_id = _install_report(tmp_path, monkeypatch)
+    client = TestClient(_make_app(session_factory=None))
+
+    res = client.get("/api/admin/registry/lead-hygiene-reports")
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert len(body) == 1
+    report = body[0]
+    assert report["job_id"] == job_id
+    assert report["short_job_id"] == "aaaaaaaa..."
+    assert report["has_json_report"] is True
+    assert report["importable"] is True
+    assert report["rows_seen"] == 2
+    assert "Completed" in report["label"]
+    assert "2 rows" in report["label"]
+    assert str(tmp_path) not in res.text
+    assert "lead_hygiene_report.json" not in res.text
+
+
+def test_lead_hygiene_reports_marks_completed_missing_json_not_importable(tmp_path, monkeypatch):
+    if not HAS_AIOSQLITE:
+        import pytest
+        pytest.skip("aiosqlite is not installed in this local environment")
+    monkeypatch.setenv("CLERK_ADMIN_USER_ID", "user_3ASrwDOrSTaDxCus6f1B5lnDsgz")
+    job_id = _install_report(tmp_path, monkeypatch, job_id="b" * 32, write_json=False)
+    client = TestClient(_make_app(session_factory=None))
+
+    res = client.get("/api/admin/registry/lead-hygiene-reports")
+    assert res.status_code == 200, res.text
+    report = res.json()[0]
+    assert report["job_id"] == job_id
+    assert report["status"] == "completed"
+    assert report["has_json_report"] is False
+    assert report["importable"] is False
 
 
 def test_admin_guard_rejects_non_admin(monkeypatch):

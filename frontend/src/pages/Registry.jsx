@@ -50,6 +50,11 @@ function Empty({ label }) {
   return <p style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: '0.78rem', margin: 0 }}>{label}</p>
 }
 
+function importSummaryText(result) {
+  if (!result) return ''
+  return `Imported ${result.rows_seen} rows. New households: ${result.households_created}; people: ${result.people_created}; contacts: ${result.contact_methods_created}; recommendations: ${result.recommendations_created}.`
+}
+
 function DataTable({ columns, rows, onRowClick }) {
   if (!rows?.length) return <Empty label="No records yet." />
   return (
@@ -152,11 +157,13 @@ export default function Registry() {
   const [recommendations, setRecommendations] = useState([])
   const [events, setEvents] = useState([])
   const [connections, setConnections] = useState([])
+  const [leadHygieneReports, setLeadHygieneReports] = useState([])
+  const [selectedReportId, setSelectedReportId] = useState('')
   const [query, setQuery] = useState('')
   const [searchResults, setSearchResults] = useState(null)
   const [detail, setDetail] = useState(null)
-  const [jobId, setJobId] = useState('')
   const [importResult, setImportResult] = useState(null)
+  const [importMessage, setImportMessage] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
@@ -181,13 +188,14 @@ export default function Registry() {
   const loadCore = useCallback(async () => {
     setError('')
     try {
-      const [sum, hh, pp, recs, evs, conns] = await Promise.all([
+      const [sum, hh, pp, recs, evs, conns, hygieneReports] = await Promise.all([
         authFetch(`${API_BASE}/summary`),
         authFetch(`${API_BASE}/households?limit=50`),
         authFetch(`${API_BASE}/people?limit=50`),
         authFetch(`${API_BASE}/recommendations?limit=50`),
         authFetch(`${API_BASE}/consent-events?limit=50`),
         authFetch(`${API_BASE}/connections`),
+        authFetch(`${API_BASE}/lead-hygiene-reports?limit=50`),
       ])
       setSummary(sum)
       setHouseholds(hh)
@@ -195,6 +203,7 @@ export default function Registry() {
       setRecommendations(recs)
       setEvents(evs)
       setConnections(conns)
+      setLeadHygieneReports(hygieneReports)
     } catch (e) {
       setError(e.message)
     }
@@ -202,8 +211,18 @@ export default function Registry() {
 
   useEffect(() => { loadCore() }, [loadCore])
 
+  useEffect(() => {
+    if (selectedReportId && leadHygieneReports.some((report) => report.job_id === selectedReportId)) return
+    const firstImportable = leadHygieneReports.find((report) => report.importable)
+    setSelectedReportId(firstImportable?.job_id || leadHygieneReports[0]?.job_id || '')
+  }, [leadHygieneReports, selectedReportId])
+
   const counts = summary?.counts || {}
   const highRisk = useMemo(() => recommendations.filter((r) => r.risk_level === 'high'), [recommendations])
+  const selectedReport = useMemo(
+    () => leadHygieneReports.find((report) => report.job_id === selectedReportId) || null,
+    [leadHygieneReports, selectedReportId],
+  )
 
   async function runSearch(e) {
     e?.preventDefault()
@@ -230,20 +249,87 @@ export default function Registry() {
 
   async function importReport(e) {
     e.preventDefault()
-    if (!jobId.trim()) return
+    if (!selectedReport) {
+      setImportMessage('No Lead Hygiene report is selected.')
+      return
+    }
+    if (!selectedReport.importable) {
+      setImportMessage(selectedReport.has_json_report
+        ? 'Selected Lead Hygiene job is not completed yet.'
+        : 'Selected Lead Hygiene job does not have a completed JSON report yet.')
+      return
+    }
     setLoading(true)
     setError('')
     setImportResult(null)
+    setImportMessage('')
     try {
-      const data = await authFetch(`${API_BASE}/imports/lead-hygiene/${jobId.trim()}`, { method: 'POST', body: '{}' })
+      const data = await authFetch(`${API_BASE}/imports/lead-hygiene/${selectedReport.job_id}`, { method: 'POST', body: '{}' })
       setImportResult(data)
+      setImportMessage(importSummaryText(data))
       await loadCore()
     } catch (err) {
-      setError(err.message)
+      setImportMessage(err.message)
     } finally {
       setLoading(false)
     }
   }
+
+  const importPanel = (
+    <section className="section" style={{ marginBottom: '1rem' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap', marginBottom: '0.75rem' }}>
+        <div className="section-title" style={{ marginBottom: 0 }}>Lead Hygiene Reports</div>
+        <Badge>local DB only</Badge>
+      </div>
+      {leadHygieneReports.length === 0 ? (
+        <Empty label="No Lead Hygiene reports found yet. Run a hygiene audit below, then refresh this list to import it into Registry." />
+      ) : (
+        <form onSubmit={importReport} style={{ display: 'grid', gap: '0.75rem' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(260px, 1fr) auto', gap: '0.5rem', alignItems: 'center' }}>
+            <select
+              className="input"
+              value={selectedReportId}
+              onChange={(e) => {
+                setSelectedReportId(e.target.value)
+                setImportMessage('')
+              }}
+              style={{ minWidth: 0 }}
+            >
+              {leadHygieneReports.map((report) => (
+                <option key={report.job_id} value={report.job_id}>
+                  {report.label}{report.importable ? '' : ' - not importable'}
+                </option>
+              ))}
+            </select>
+            <button className="btn-primary" type="submit" disabled={loading || !selectedReport?.importable}>
+              {loading ? 'Importing...' : 'Import Selected'}
+            </button>
+          </div>
+          {selectedReport && (
+            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+              <Badge tone={selectedReport.importable ? 'green' : 'amber'}>{selectedReport.status}</Badge>
+              <Badge>{selectedReport.source_label || 'Lead Hygiene'}</Badge>
+              <span style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: '0.72rem' }}>
+                Job {selectedReport.short_job_id}
+              </span>
+            </div>
+          )}
+          {selectedReport && !selectedReport.importable && (
+            <p style={{ color: 'var(--amber)', fontFamily: 'var(--font-mono)', fontSize: '0.75rem', margin: 0 }}>
+              {selectedReport.has_json_report
+                ? 'This report cannot be imported until the job is completed.'
+                : 'This job has no completed JSON report yet. Import is disabled.'}
+            </p>
+          )}
+          {importMessage && (
+            <p style={{ color: importResult ? 'var(--green)' : 'var(--amber)', fontFamily: 'var(--font-mono)', fontSize: '0.75rem', margin: 0 }}>
+              {importMessage}
+            </p>
+          )}
+        </form>
+      )}
+    </section>
+  )
 
   return (
     <div className="dashboard" style={{ maxWidth: 1180 }}>
@@ -285,19 +371,7 @@ export default function Registry() {
             <Stat label="Contacts" value={counts.contact_methods} />
             <Stat label="Recommendations" value={counts.recommendations} />
           </section>
-          <section className="section" style={{ marginBottom: '1rem' }}>
-            <div className="section-title">Lead Hygiene Import</div>
-            <form onSubmit={importReport} style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
-              <input className="input" value={jobId} onChange={(e) => setJobId(e.target.value)} placeholder="Lead Hygiene job ID" style={{ minWidth: 280 }} />
-              <button className="btn-primary" type="submit" disabled={loading}>{loading ? 'Importing...' : 'Import Report'}</button>
-              <Badge>local DB only</Badge>
-            </form>
-            {importResult && (
-              <p style={{ color: 'var(--green)', fontFamily: 'var(--font-mono)', fontSize: '0.75rem', marginTop: '0.75rem' }}>
-                Imported {importResult.rows_seen} rows. New households: {importResult.households_created}; recommendations: {importResult.recommendations_created}.
-              </p>
-            )}
-          </section>
+          {importPanel}
           <section className="section">
             <div className="section-title">Recent Recommendations</div>
             <DataTable columns={[
@@ -356,7 +430,12 @@ export default function Registry() {
         </section>
       )}
 
-      {tab === 'Hygiene' && <LeadHygiene />}
+      {tab === 'Hygiene' && (
+        <>
+          {importPanel}
+          <LeadHygiene />
+        </>
+      )}
 
       {tab === 'Conflicts' && (
         <section className="section">
@@ -419,4 +498,3 @@ export default function Registry() {
     </div>
   )
 }
-

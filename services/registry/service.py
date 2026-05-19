@@ -21,6 +21,7 @@ from db.models import (
     RegistrySourceSnapshot,
 )
 from services.lead_hygiene import normalize_email, normalize_name, normalize_phone
+from services import lead_hygiene_jobs
 from services.lead_hygiene_jobs import resolve_report_path
 
 
@@ -235,6 +236,67 @@ def connection_statuses() -> list[dict[str, Any]]:
         {"source": "ghl", "configured": bool(ghl_key), "mode": "read-only", "secret": "masked"},
         {"source": "notion", "configured": bool(notion_token), "mode": "csv/read-only", "secret": "masked"},
     ]
+
+
+def list_lead_hygiene_reports(limit: int = 50) -> list[dict[str, Any]]:
+    reports = []
+    for run in lead_hygiene_jobs.list_runs(limit=limit):
+        reports.append(_lead_hygiene_report_item(run))
+    return reports
+
+
+def _lead_hygiene_report_item(run: dict[str, Any]) -> dict[str, Any]:
+    job_id = str(run.get("job_id") or "")
+    short_job_id = f"{job_id[:8]}..." if len(job_id) > 8 else job_id
+    status = str(run.get("status") or "unknown")
+    reports = run.get("reports") or {}
+    has_json_report = bool(reports.get("json"))
+    rows_seen = _summary_row_count(run.get("summary"))
+    source_label = _source_label(run.get("params") or {})
+    created_at = run.get("started_at")
+    updated_at = run.get("finished_at") or created_at
+    label = _report_label(status=status, rows_seen=rows_seen, created_at=created_at, short_job_id=short_job_id)
+    return {
+        "job_id": job_id,
+        "short_job_id": short_job_id,
+        "label": label,
+        "display_name": label,
+        "status": status,
+        "created_at": created_at,
+        "updated_at": updated_at,
+        "rows_seen": rows_seen,
+        "source_label": source_label,
+        "has_json_report": has_json_report,
+        "importable": status == "completed" and has_json_report,
+    }
+
+
+def _summary_row_count(summary: Any) -> Optional[int]:
+    if not isinstance(summary, dict):
+        return None
+    for key in ("total", "total_rows", "rows_seen", "row_count"):
+        value = summary.get(key)
+        if isinstance(value, int):
+            return value
+    return None
+
+
+def _source_label(params: dict[str, Any]) -> str:
+    if params.get("fixture_mode"):
+        return "Fixture"
+    pieces = ["Close"]
+    if params.get("include_ghl", True):
+        pieces.append("GHL")
+    if params.get("notion_csv_path"):
+        pieces.append("Notion CSV")
+    return " + ".join(pieces)
+
+
+def _report_label(status: str, rows_seen: Optional[int], created_at: Any, short_job_id: str) -> str:
+    status_label = status.replace("_", " ").title()
+    row_label = f"{rows_seen:,} rows" if isinstance(rows_seen, int) else "rows unknown"
+    date_label = str(created_at or "date unknown")
+    return f"{status_label} - {row_label} - {date_label} - {short_job_id}"
 
 
 async def import_lead_hygiene_report(session: AsyncSession, job_id: str) -> ImportCounters:

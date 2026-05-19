@@ -21,6 +21,7 @@ from services.registry.schemas import (
     RegistryHouseholdDetail,
     RegistryHouseholdOut,
     RegistryImportSummary,
+    RegistryLeadHygieneReportOut,
     RegistryPersonDetail,
     RegistryPersonOut,
     RegistryRecommendationOut,
@@ -143,6 +144,15 @@ async def get_connections(_user=Depends(require_admin)):
     return service.connection_statuses()
 
 
+@router.get("/lead-hygiene-reports", response_model=list[RegistryLeadHygieneReportOut])
+async def get_lead_hygiene_reports(
+    limit: int = Query(50, ge=1, le=100),
+    _user=Depends(require_admin),
+):
+    _enabled()
+    return service.list_lead_hygiene_reports(limit=limit)
+
+
 @router.post("/imports/lead-hygiene/{job_id}", response_model=RegistryImportSummary)
 async def import_lead_hygiene(
     job_id: str,
@@ -168,4 +178,3 @@ async def import_source_shell(source: str, _user=Depends(require_admin)):
         status_code=status.HTTP_501_NOT_IMPLEMENTED,
         detail=f"{source} live import is review-only shell in Registry v1. No external writes are available.",
     )
-

@@ -119,9 +119,22 @@ class RegistryImportSummary(BaseModel):
     consent_events_created: int
 
 
+class RegistryLeadHygieneReportOut(BaseModel):
+    job_id: str
+    short_job_id: str
+    label: str
+    display_name: str
+    status: str
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    rows_seen: Optional[int] = None
+    source_label: Optional[str] = None
+    has_json_report: bool
+    importable: bool
+
+
 class RegistryConnectionStatus(BaseModel):
     source: str
     configured: bool
     mode: str
     secret: str = "masked"
-
