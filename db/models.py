@@ -297,6 +297,21 @@ class ResearchTrigger(Base):
     notes: str = Column(Text, nullable=True)
 
 
+class CarrierFavorite(Base):
+    """Saved carrier dial contacts for the 3 Way Bridge cockpit."""
+
+    __tablename__ = "carrier_favorites"
+
+    id: str = Column(String(36), primary_key=True, default=lambda: str(__import__("uuid").uuid4()))
+    user_id: str = Column(String(128), nullable=False, index=True)
+    carrier_name: str = Column(String(256), nullable=False)
+    carrier_dept: str = Column(String(256), nullable=False, default="")
+    carrier_number: str = Column(String(32), nullable=False)
+    dial_instructions: str = Column(Text, nullable=True)
+    created_at: datetime = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at: datetime = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 class ConferenceSession(Base):
     """PSTN conference bridge sessions — 3-way calls (Seb + Lead + Carrier)."""
 

@@ -16,7 +16,7 @@ from sqlalchemy import desc, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import get_settings
-from db.models import ConferenceSession
+from db.models import CarrierFavorite, ConferenceSession
 from services import twilio_client
 
 logger = logging.getLogger("falconconnect.conference")
@@ -49,6 +49,91 @@ def normalize_e164(phone: str) -> str:
 
 def _generate_conference_name(conf_id: str) -> str:
     return f"fc-bridge-{conf_id[:8]}-{uuid.uuid4().hex[:6]}"
+
+
+def _favorite_payload(fav: CarrierFavorite) -> Dict[str, Any]:
+    return {
+        "id": str(fav.id),
+        "carrier_name": fav.carrier_name,
+        "carrier_dept": fav.carrier_dept or "",
+        "carrier_number": fav.carrier_number,
+        "dial_instructions": fav.dial_instructions or "",
+        "created_at": fav.created_at.isoformat() if fav.created_at else None,
+        "updated_at": fav.updated_at.isoformat() if fav.updated_at else None,
+    }
+
+
+async def list_carrier_favorites(session: AsyncSession, user_id: str) -> list[Dict[str, Any]]:
+    stmt = select(CarrierFavorite).where(CarrierFavorite.user_id == user_id).order_by(CarrierFavorite.carrier_name, CarrierFavorite.carrier_dept)
+    result = await session.execute(stmt)
+    return [_favorite_payload(fav) for fav in result.scalars().all()]
+
+
+async def create_carrier_favorite(
+    session: AsyncSession,
+    *,
+    user_id: str,
+    carrier_name: str,
+    carrier_dept: str,
+    carrier_number: str,
+    dial_instructions: str = "",
+) -> Dict[str, Any]:
+    fav = CarrierFavorite(
+        user_id=user_id,
+        carrier_name=carrier_name.strip(),
+        carrier_dept=carrier_dept.strip(),
+        carrier_number=normalize_e164(carrier_number),
+        dial_instructions=dial_instructions.strip(),
+    )
+    if not fav.carrier_name:
+        raise ValueError("Carrier name is required")
+    if not fav.carrier_dept:
+        raise ValueError("Carrier department is required")
+    session.add(fav)
+    await session.commit()
+    await session.refresh(fav)
+    return _favorite_payload(fav)
+
+
+async def update_carrier_favorite(
+    session: AsyncSession,
+    *,
+    favorite_id: str,
+    user_id: str,
+    carrier_name: str,
+    carrier_dept: str,
+    carrier_number: str,
+    dial_instructions: str = "",
+) -> Dict[str, Any]:
+    fav = await _get_carrier_favorite(session, favorite_id, user_id)
+    fav.carrier_name = carrier_name.strip()
+    fav.carrier_dept = carrier_dept.strip()
+    fav.carrier_number = normalize_e164(carrier_number)
+    fav.dial_instructions = dial_instructions.strip()
+    if not fav.carrier_name:
+        raise ValueError("Carrier name is required")
+    if not fav.carrier_dept:
+        raise ValueError("Carrier department is required")
+    await session.commit()
+    await session.refresh(fav)
+    return _favorite_payload(fav)
+
+
+async def delete_carrier_favorite(session: AsyncSession, *, favorite_id: str, user_id: str) -> Dict[str, Any]:
+    fav = await _get_carrier_favorite(session, favorite_id, user_id)
+    await session.delete(fav)
+    await session.commit()
+    return {"deleted": True, "id": favorite_id}
+
+
+async def _get_carrier_favorite(session: AsyncSession, favorite_id: str, user_id: str) -> CarrierFavorite:
+    result = await session.execute(
+        select(CarrierFavorite).where(CarrierFavorite.id == favorite_id, CarrierFavorite.user_id == user_id)
+    )
+    fav = result.scalar_one_or_none()
+    if not fav:
+        raise ValueError("Carrier favorite not found")
+    return fav
 
 
 async def start_bridge_session(
@@ -357,22 +442,13 @@ async def end_conference_session(session: AsyncSession, conf_id: str) -> Dict[st
                 await twilio_client.complete_call(call_sid)
             except Exception as exc:
                 logger.warning("Could not complete call %s: %s", call_sid, exc)
-    now = datetime.now(timezone.utc)
-    conf.status = "ended"
-    conf.ended_at = now
-    if conf.started_at:
-        conf.call_duration_seconds = int((now - conf.started_at).total_seconds())
-    try:
-        await _log_to_close(conf)
-        conf.close_activity_logged = True
-    except Exception as exc:
-        logger.error("Failed to log bridge call to Close: %s", exc)
-    await session.commit()
+    await _finish_session(session, conf, log_to_close=True)
     return {"conf_id": conf_id, "status": "ended", "duration_seconds": conf.call_duration_seconds, "close_logged": conf.close_activity_logged}
 
 
 async def get_conference_status(session: AsyncSession, conf_id: str) -> Dict[str, Any]:
     conf = await _get_conference(session, conf_id)
+    await _mark_ended_if_no_connected_calls(session, conf)
     twilio_participants: Dict[str, Dict[str, Any]] = {}
     if conf.conference_sid and conf.status in {"conference_live", "carrier_connected", "dialing_carrier", "upgrade_pending"}:
         try:
@@ -456,6 +532,11 @@ async def update_conference_sid(session: AsyncSession, conf_id: str, conference_
     values: Dict[str, Any] = {"conference_sid": conference_sid}
     if event in {"participant-join", "conference-start"}:
         values["status"] = "conference_live"
+    if event in {"conference-end", "participant-leave"}:
+        conf = await _get_conference(session, conf_id)
+        await _mark_ended_if_no_connected_calls(session, conf)
+        if conf.status == "ended":
+            return
     if event == "participant-join" and call_sid:
         conf = await _get_conference(session, conf_id)
         if call_sid == conf.carrier_participant_sid:
@@ -566,6 +647,60 @@ def _participant_state(
         "hold": state.get("hold", False),
         "status": state.get("status") or ("known" if call_sid else "not_connected"),
     }
+
+
+async def _mark_ended_if_no_connected_calls(session: AsyncSession, conf: ConferenceSession) -> None:
+    if conf.status == "ended" or conf.status not in ACTIVE_BRIDGE_STATUSES:
+        return
+    call_sids = [sid for sid in (conf.lead_participant_sid, conf.seb_participant_sid, conf.carrier_participant_sid) if sid]
+    if not call_sids:
+        return
+
+    active_call_statuses = {"queued", "ringing", "in-progress"}
+    terminal_call_statuses = {"completed", "busy", "failed", "no-answer", "canceled"}
+
+    if conf.conference_sid and str(conf.conference_sid).startswith("CF"):
+        try:
+            participants = await twilio_client.list_conference_participants(conf.conference_sid)
+        except Exception as exc:
+            logger.warning("Auto-end skipped; could not check conference participants for %s: %s", conf.id, exc)
+            return
+        if any((p.get("status") or "").lower() == "connected" for p in participants):
+            return
+
+    terminal_count = 0
+    for call_sid in call_sids:
+        try:
+            call = await twilio_client.get_call(call_sid)
+        except Exception as exc:
+            logger.warning("Auto-end skipped; could not check call %s: %s", call_sid, exc)
+            return
+        status = (call.get("status") or "").lower()
+        if status in active_call_statuses:
+            return
+        if status in terminal_call_statuses:
+            terminal_count += 1
+        else:
+            logger.info("Auto-end skipped; call %s has inconclusive status %s", call_sid, status)
+            return
+
+    if terminal_count == len(call_sids):
+        await _finish_session(session, conf, log_to_close=True)
+
+
+async def _finish_session(session: AsyncSession, conf: ConferenceSession, *, log_to_close: bool) -> None:
+    now = datetime.now(timezone.utc)
+    conf.status = "ended"
+    conf.ended_at = conf.ended_at or now
+    if conf.started_at:
+        conf.call_duration_seconds = int((conf.ended_at - conf.started_at).total_seconds())
+    if log_to_close and not conf.close_activity_logged:
+        try:
+            await _log_to_close(conf)
+            conf.close_activity_logged = True
+        except Exception as exc:
+            logger.error("Failed to log bridge call to Close: %s", exc)
+    await session.commit()
 
 
 async def _resolve_lead_id(conf: ConferenceSession) -> str:

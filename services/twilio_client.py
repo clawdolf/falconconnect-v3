@@ -229,3 +229,12 @@ async def get_call(call_sid: str) -> Dict[str, Any]:
         resp = await client.get(url, headers=_auth_header())
         resp.raise_for_status()
         return resp.json()
+
+
+async def get_participant(conference_sid: str, call_sid: str) -> Dict[str, Any]:
+    """Get one conference participant by call SID."""
+    url = f"{_account_url()}/Conferences/{conference_sid}/Participants/{call_sid}.json"
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.get(url, headers=_auth_header())
+        resp.raise_for_status()
+        return resp.json()

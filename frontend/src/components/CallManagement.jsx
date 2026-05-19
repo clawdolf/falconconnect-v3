@@ -2,11 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 const API = '/api'
 const BRIDGE_DISPLAY = 'Bridge number loads after session creation'
-const FAVORITE_CARRIERS = [
-  { label: 'Test Carrier 914', phone: '' },
-  { label: 'Mutual of Omaha UW', phone: '' },
-  { label: 'Manual number', phone: '' },
-]
+const EMPTY_FAV_FORM = { carrier_name: '', carrier_dept: '', carrier_number: '', dial_instructions: '' }
 
 function CallManagement() {
   const [leadPhone, setLeadPhone] = useState('')
@@ -14,8 +10,14 @@ function CallManagement() {
   const [session, setSession] = useState(null)
   const [status, setStatus] = useState(null)
   const [sessions, setSessions] = useState([])
-  const [carrierChoice, setCarrierChoice] = useState(FAVORITE_CARRIERS[0].label)
-  const [carrierPhone, setCarrierPhone] = useState(FAVORITE_CARRIERS[0].phone)
+  const [carrierFavs, setCarrierFavs] = useState([])
+  const [carrierChoice, setCarrierChoice] = useState('Manual number')
+  const [carrierPhone, setCarrierPhone] = useState('')
+  const [favForm, setFavForm] = useState(EMPTY_FAV_FORM)
+  const [editingFavId, setEditingFavId] = useState('')
+  const [showCarrierFavs, setShowCarrierFavs] = useState(true)
+  const [showRecentSessions, setShowRecentSessions] = useState(false)
+  const [instructionPopup, setInstructionPopup] = useState(null)
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
   const [log, setLog] = useState([{ ts: new Date(), msg: 'Cockpit ready.' }])
@@ -64,6 +66,7 @@ function CallManagement() {
 
   useEffect(() => {
     loadSessions()
+    loadCarrierFavs()
   }, [])
 
   async function loadSessions() {
@@ -73,6 +76,81 @@ function CallManagement() {
     } catch {
       // Recent sessions are non-critical for the live cockpit.
     }
+  }
+
+  async function loadCarrierFavs() {
+    try {
+      const res = await fetch(`${API}/conference/carrier-favorites`, { headers: authHeaders() })
+      if (res.ok) setCarrierFavs(await res.json())
+    } catch {
+      // Carrier favorites are optional.
+    }
+  }
+
+  async function saveCarrierFav(event) {
+    event.preventDefault()
+    setBusy('save-fav')
+    setError('')
+    try {
+      const path = editingFavId ? `${API}/conference/carrier-favorites/${editingFavId}` : `${API}/conference/carrier-favorites`
+      const res = await fetch(path, {
+        method: editingFavId ? 'PUT' : 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify(favForm),
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(body.detail || `Save favorite failed (${res.status})`)
+      }
+      setFavForm(EMPTY_FAV_FORM)
+      setEditingFavId('')
+      await loadCarrierFavs()
+      addLog('Carrier favorite saved.')
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusy('')
+    }
+  }
+
+  async function deleteCarrierFav(fav) {
+    if (!window.confirm(`Delete ${fav.carrier_name} ${fav.carrier_dept}?`)) return
+    setBusy(`delete-fav-${fav.id}`)
+    setError('')
+    try {
+      const res = await fetch(`${API}/conference/carrier-favorites/${fav.id}`, { method: 'DELETE', headers: authHeaders() })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(body.detail || `Delete favorite failed (${res.status})`)
+      }
+      if (carrierChoice === fav.id) {
+        setCarrierChoice('Manual number')
+        setCarrierPhone('')
+      }
+      await loadCarrierFavs()
+      addLog('Carrier favorite deleted.')
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusy('')
+    }
+  }
+
+  function editCarrierFav(fav) {
+    setEditingFavId(fav.id)
+    setFavForm({
+      carrier_name: fav.carrier_name || '',
+      carrier_dept: fav.carrier_dept || '',
+      carrier_number: fav.carrier_number || '',
+      dial_instructions: fav.dial_instructions || '',
+    })
+    setShowCarrierFavs(true)
+  }
+
+  function useCarrierFav(fav) {
+    setCarrierChoice(fav.id)
+    setCarrierPhone(fav.carrier_number || '')
+    setInstructionPopup(fav.dial_instructions ? fav : null)
   }
 
   async function findLiveBridge() {
@@ -181,10 +259,14 @@ function CallManagement() {
     await postAction(`${action}/${participant}`, `${action} ${participant}`)
   }
 
-  function selectCarrier(label) {
-    setCarrierChoice(label)
-    const found = FAVORITE_CARRIERS.find((carrier) => carrier.label === label)
-    if (found?.phone) setCarrierPhone(found.phone)
+  function selectCarrier(value) {
+    setCarrierChoice(value)
+    if (value === 'Manual number') {
+      setInstructionPopup(null)
+      return
+    }
+    const fav = carrierFavs.find((carrier) => carrier.id === value)
+    if (fav) useCarrierFav(fav)
   }
 
   const participants = useMemo(() => ([
@@ -262,7 +344,10 @@ function CallManagement() {
             <div style={styles.carrierFields}>
               <Field label="Favorite carrier">
                 <select style={styles.input} value={carrierChoice} onChange={(e) => selectCarrier(e.target.value)}>
-                  {FAVORITE_CARRIERS.map((carrier) => <option key={carrier.label}>{carrier.label}</option>)}
+                  <option>Manual number</option>
+                  {carrierFavs.map((carrier) => (
+                    <option key={carrier.id} value={carrier.id}>{carrier.carrier_name} — {carrier.carrier_dept}</option>
+                  ))}
                 </select>
               </Field>
               <Field label="Carrier phone">
@@ -273,6 +358,15 @@ function CallManagement() {
               {busy === 'carrier' ? 'Dialing...' : 'Add Carrier'}
             </button>
           </div>
+          {instructionPopup && (
+            <div style={styles.instructionBox}>
+              <div style={styles.sectionHead}>
+                <strong>{instructionPopup.carrier_name} — {instructionPopup.carrier_dept}</strong>
+                <button type="button" style={styles.textButton} onClick={() => setInstructionPopup(null)}>Hide</button>
+              </div>
+              <p style={styles.instructionText}>{instructionPopup.dial_instructions}</p>
+            </div>
+          )}
         </section>
       )}
 
@@ -301,24 +395,84 @@ function CallManagement() {
 
       <section style={styles.section}>
         <div style={styles.sectionHead}>
-          <h2 style={styles.sectionTitle}>Recent Sessions</h2>
-          <button type="button" style={styles.textButton} onClick={loadSessions}>Reload</button>
+          <h2 style={styles.sectionTitle}>Carrier Favs</h2>
+          <button type="button" style={styles.textButton} onClick={() => setShowCarrierFavs((value) => !value)}>
+            {showCarrierFavs ? 'Collapse' : 'Expand'}
+          </button>
         </div>
-        <div style={styles.table}>
-          <div style={{ ...styles.row, ...styles.tableHead }}>
-            <span>Lead</span><span>Carrier</span><span>Status</span><span>Started</span>
-          </div>
-          {sessions.length === 0 ? (
-            <div style={styles.empty}>No bridge sessions yet.</div>
-          ) : sessions.map((item) => (
-            <div key={item.conf_id} style={styles.row}>
-              <span>{formatPhone(item.lead_phone)}</span>
-              <span>{formatPhone(item.carrier_phone) || '-'}</span>
-              <span>{item.status}</span>
-              <span>{item.started_at ? new Date(item.started_at).toLocaleString() : '-'}</span>
+        {showCarrierFavs && (
+          <div style={styles.favPanel}>
+            <form onSubmit={saveCarrierFav} style={styles.favForm}>
+              <Field label="Carrier name">
+                <input style={styles.input} value={favForm.carrier_name} onChange={(e) => setFavForm((prev) => ({ ...prev, carrier_name: e.target.value }))} placeholder="Mutual of Omaha" required />
+              </Field>
+              <Field label="Carrier dept">
+                <input style={styles.input} value={favForm.carrier_dept} onChange={(e) => setFavForm((prev) => ({ ...prev, carrier_dept: e.target.value }))} placeholder="Underwriting" required />
+              </Field>
+              <Field label="Carrier number">
+                <input style={styles.input} type="tel" value={favForm.carrier_number} onChange={(e) => setFavForm((prev) => ({ ...prev, carrier_number: e.target.value }))} placeholder="+1..." required />
+              </Field>
+              <Field label="Dial instructions / ext">
+                <textarea style={{ ...styles.input, minHeight: 62 }} value={favForm.dial_instructions} onChange={(e) => setFavForm((prev) => ({ ...prev, dial_instructions: e.target.value }))} placeholder="Navigate to 2, then 3, then 5, then 1. Or ext 2412." />
+              </Field>
+              <button type="submit" style={styles.primaryButton} disabled={busy === 'save-fav'}>
+                {editingFavId ? 'Update Fav' : 'Save Fav'}
+              </button>
+              {editingFavId && (
+                <button type="button" style={styles.secondaryButton} onClick={() => { setEditingFavId(''); setFavForm(EMPTY_FAV_FORM) }}>
+                  Cancel
+                </button>
+              )}
+            </form>
+            <div style={styles.favList}>
+              {carrierFavs.length === 0 ? (
+                <div style={styles.empty}>No carrier favorites yet.</div>
+              ) : carrierFavs.map((fav) => (
+                <div key={fav.id} style={styles.favRow}>
+                  <div>
+                    <strong>{fav.carrier_name}</strong>
+                    <div style={styles.monoMuted}>{fav.carrier_dept} · {formatPhone(fav.carrier_number)}</div>
+                  </div>
+                  <div style={styles.favActions}>
+                    {fav.dial_instructions && <button type="button" style={styles.textButton} onClick={() => setInstructionPopup(fav)}>Instructions</button>}
+                    <button type="button" style={styles.textButton} onClick={() => useCarrierFav(fav)}>Use</button>
+                    <button type="button" style={styles.textButton} onClick={() => editCarrierFav(fav)}>Edit</button>
+                    <button type="button" style={styles.dropButton} onClick={() => deleteCarrierFav(fav)}>Delete</button>
+                  </div>
+                </div>
+              ))}
             </div>
-          ))}
+          </div>
+        )}
+      </section>
+
+      <section style={styles.section}>
+        <div style={styles.sectionHead}>
+          <h2 style={styles.sectionTitle}>Recent Sessions</h2>
+          <div style={styles.favActions}>
+            <button type="button" style={styles.textButton} onClick={loadSessions}>Reload</button>
+            <button type="button" style={styles.textButton} onClick={() => setShowRecentSessions((value) => !value)}>
+              {showRecentSessions ? 'Collapse' : 'Expand'}
+            </button>
+          </div>
         </div>
+        {showRecentSessions && (
+          <div style={styles.table}>
+            <div style={{ ...styles.row, ...styles.tableHead }}>
+              <span>Lead</span><span>Carrier</span><span>Status</span><span>Started</span>
+            </div>
+            {sessions.length === 0 ? (
+              <div style={styles.empty}>No bridge sessions yet.</div>
+            ) : sessions.map((item) => (
+              <div key={item.conf_id} style={styles.row}>
+                <span>{formatPhone(item.lead_phone)}</span>
+                <span>{formatPhone(item.carrier_phone) || '-'}</span>
+                <span>{item.status}</span>
+                <span>{item.started_at ? new Date(item.started_at).toLocaleString() : '-'}</span>
+              </div>
+            ))}
+          </div>
+        )}
       </section>
     </div>
   )
@@ -440,6 +594,13 @@ const styles = {
   dropButton: { ...buttonBase, padding: '0.38rem 0.35rem', background: 'transparent', border: '1px solid var(--red)', color: 'var(--red)', fontSize: '0.62rem' },
   dropPrimary: { ...buttonBase, padding: '0.38rem 0.35rem', background: 'var(--red)', border: '1px solid var(--red)', color: 'var(--text)', fontSize: '0.62rem' },
   logBox: { marginTop: '0.75rem', background: 'var(--bg)', border: '1px solid var(--border)', maxHeight: 180, overflow: 'auto', padding: '0.5rem' },
+  instructionBox: { marginTop: '0.75rem', background: 'var(--bg)', border: '1px solid var(--amber)', padding: '0.75rem' },
+  instructionText: { margin: 0, color: 'var(--text)', fontFamily: 'var(--font-mono)', fontSize: '0.78rem', whiteSpace: 'pre-wrap' },
+  favPanel: { display: 'grid', gap: '0.9rem' },
+  favForm: { display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1.4fr auto auto', gap: '0.65rem', alignItems: 'end' },
+  favList: { display: 'grid', gap: '0.5rem' },
+  favRow: { display: 'grid', gridTemplateColumns: '1fr auto', gap: '0.75rem', alignItems: 'center', background: 'var(--bg)', border: '1px solid var(--border)', padding: '0.65rem' },
+  favActions: { display: 'flex', gap: '0.4rem', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' },
   logLine: { display: 'grid', gridTemplateColumns: '92px 1fr', gap: '0.75rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: '0.66rem', lineHeight: 1.5 },
   table: { overflowX: 'auto' },
   row: { display: 'grid', gridTemplateColumns: '1fr 1fr 0.8fr 1.2fr', gap: '0.75rem', minWidth: 680, borderBottom: '1px solid var(--border-subtle)', padding: '0.45rem 0', fontFamily: 'var(--font-mono)', fontSize: '0.68rem' },

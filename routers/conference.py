@@ -11,7 +11,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sqlalchemy import select
@@ -73,6 +73,13 @@ class StartBridgeResponse(BaseModel):
 class CarrierRequest(BaseModel):
     carrier_phone: str
     carrier_label: str = "Carrier"
+
+
+class CarrierFavoriteRequest(BaseModel):
+    carrier_name: str = Field(min_length=1, max_length=256)
+    carrier_dept: str = Field(min_length=1, max_length=256)
+    carrier_number: str = Field(min_length=1, max_length=32)
+    dial_instructions: str = Field(default="", max_length=2000)
 
 
 class DialCarrierRequest(BaseModel):
@@ -185,6 +192,70 @@ async def find_live_bridge(
     if not result:
         raise HTTPException(status_code=404, detail="No live bridge found")
     return result
+
+
+@router.get("/conference/carrier-favorites")
+async def list_carrier_favorites(
+    session: AsyncSession = Depends(get_session),
+    user=Depends(require_auth),
+):
+    return await conf_service.list_carrier_favorites(
+        session, user_id=user.get("user_id") or user.get("sub")
+    )
+
+
+@router.post("/conference/carrier-favorites")
+async def create_carrier_favorite(
+    req: CarrierFavoriteRequest,
+    session: AsyncSession = Depends(get_session),
+    user=Depends(require_auth),
+):
+    try:
+        return await conf_service.create_carrier_favorite(
+            session=session,
+            user_id=user.get("user_id") or user.get("sub"),
+            carrier_name=req.carrier_name,
+            carrier_dept=req.carrier_dept,
+            carrier_number=req.carrier_number,
+            dial_instructions=req.dial_instructions,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.put("/conference/carrier-favorites/{favorite_id}")
+async def update_carrier_favorite(
+    favorite_id: str,
+    req: CarrierFavoriteRequest,
+    session: AsyncSession = Depends(get_session),
+    user=Depends(require_auth),
+):
+    try:
+        return await conf_service.update_carrier_favorite(
+            session=session,
+            favorite_id=favorite_id,
+            user_id=user.get("user_id") or user.get("sub"),
+            carrier_name=req.carrier_name,
+            carrier_dept=req.carrier_dept,
+            carrier_number=req.carrier_number,
+            dial_instructions=req.dial_instructions,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404 if "not found" in str(e).lower() else 400, detail=str(e))
+
+
+@router.delete("/conference/carrier-favorites/{favorite_id}")
+async def delete_carrier_favorite(
+    favorite_id: str,
+    session: AsyncSession = Depends(get_session),
+    user=Depends(require_auth),
+):
+    try:
+        return await conf_service.delete_carrier_favorite(
+            session=session, favorite_id=favorite_id, user_id=user.get("user_id") or user.get("sub")
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
 
 # ── Parameterized routes ──
