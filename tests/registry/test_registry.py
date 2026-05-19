@@ -8,6 +8,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
@@ -278,6 +279,13 @@ def test_sankey_empty_graph(monkeypatch):
     assert body["links"] == []
     assert body["totals"]["households"] == 0
     assert body["level"] == "household"
+    assert body["coverage_universe"] == 0
+    assert body["source_coverage"] == [
+        {"source": "close", "label": "Close", "total": 0, "matched": 0, "missing": 0, "match_pct": 0.0},
+        {"source": "ghl", "label": "GHL", "total": 0, "matched": 0, "missing": 0, "match_pct": 0.0},
+        {"source": "notion", "label": "Notion", "total": 0, "matched": 0, "missing": 0, "match_pct": 0.0},
+        {"source": "lead_hygiene", "label": "Lead Hygiene", "total": 0, "matched": 0, "missing": 0, "match_pct": 0.0},
+    ]
 
 
 def test_sankey_fixture_counts_and_no_raw_pii(tmp_path, monkeypatch):
@@ -299,6 +307,12 @@ def test_sankey_fixture_counts_and_no_raw_pii(tmp_path, monkeypatch):
     assert labels["GHL"] == 1
     assert labels["Notion"] == 1
     assert labels["Lead Hygiene"] == 2
+    coverage = {row["source"]: row for row in body["source_coverage"]}
+    assert body["coverage_universe"] == 2
+    assert coverage["close"] == {"source": "close", "label": "Close", "total": 2, "matched": 2, "missing": 0, "match_pct": 100.0}
+    assert coverage["ghl"] == {"source": "ghl", "label": "GHL", "total": 2, "matched": 1, "missing": 1, "match_pct": 50.0}
+    assert coverage["notion"] == {"source": "notion", "label": "Notion", "total": 2, "matched": 1, "missing": 1, "match_pct": 50.0}
+    assert coverage["lead_hygiene"] == {"source": "lead_hygiene", "label": "Lead Hygiene", "total": 2, "matched": 2, "missing": 0, "match_pct": 100.0}
     assert labels["High"] >= 1
     assert labels["Medium"] >= 1
     assert labels["Needs review"] >= 1
@@ -326,6 +340,42 @@ def test_sankey_fixture_counts_and_no_raw_pii(tmp_path, monkeypatch):
         "notion_1",
     ]
     assert not any(value in payload_text for value in forbidden)
+
+
+def test_sankey_source_coverage_counts_households_not_records(tmp_path, monkeypatch):
+    if not HAS_AIOSQLITE:
+        import pytest
+        pytest.skip("aiosqlite is not installed in this local environment")
+    monkeypatch.setenv("CLERK_ADMIN_USER_ID", "user_3ASrwDOrSTaDxCus6f1B5lnDsgz")
+    job_id = _install_report(tmp_path, monkeypatch)
+    sf = _run(_session_factory())
+    client = TestClient(_make_app(sf))
+    assert client.post(f"/api/admin/registry/imports/lead-hygiene/{job_id}").status_code == 200
+
+    async def _add_duplicate_close_record():
+        async with sf() as session:
+            household = await session.scalar(
+                select(RegistryHousehold).where(RegistryHousehold.display_name == "Ada Lovelace")
+            )
+            session.add(
+                RegistryExternalRecord(
+                    household_id=household.id,
+                    source="close",
+                    external_type="lead",
+                    external_id="lead_close_extra",
+                    match_basis="test",
+                )
+            )
+            await session.commit()
+
+    _run(_add_duplicate_close_record())
+
+    res = client.get("/api/admin/registry/sankey")
+    assert res.status_code == 200, res.text
+    coverage = {row["source"]: row for row in res.json()["source_coverage"]}
+    assert coverage["close"]["total"] == 2
+    assert coverage["close"]["matched"] == 2
+    assert coverage["close"]["missing"] == 0
 
 
 def test_household_rollups_and_filters(tmp_path, monkeypatch):

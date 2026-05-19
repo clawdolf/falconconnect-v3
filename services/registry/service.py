@@ -27,6 +27,9 @@ from services import lead_hygiene_jobs
 from services.lead_hygiene_jobs import resolve_report_path
 
 
+SOURCE_COVERAGE_SOURCES = ("close", "ghl", "notion", "lead_hygiene")
+
+
 @dataclass
 class ImportCounters:
     job_id: str
@@ -306,6 +309,28 @@ def _as_naive_utc(value: Optional[datetime]) -> Optional[datetime]:
     return value.astimezone(timezone.utc).replace(tzinfo=None)
 
 
+def _source_coverage(households: list[RegistryHousehold]) -> list[dict[str, Any]]:
+    total = len(households)
+    coverage: list[dict[str, Any]] = []
+    for source in SOURCE_COVERAGE_SOURCES:
+        matched = sum(1 for household in households if source in _household_sources(household))
+        # Current ingestion does not create orphan source rows. Missing means
+        # households in this Registry slice that lack this source, not live
+        # upstream rows that failed to import.
+        missing = total - matched
+        coverage.append(
+            {
+                "source": source,
+                "label": _source_display_label(source),
+                "total": total,
+                "matched": matched,
+                "missing": missing,
+                "match_pct": round((matched / total) * 100, 1) if total else 0.0,
+            }
+        )
+    return coverage
+
+
 async def sankey(
     session: AsyncSession,
     *,
@@ -429,6 +454,8 @@ async def sankey(
             "recommendations": sum(len(household.recommendations) for household in filtered),
             "links": len(links),
         },
+        "source_coverage": _source_coverage(filtered),
+        "coverage_universe": len(filtered),
         "truncated": len(bucket_totals) > top_n,
     }
 

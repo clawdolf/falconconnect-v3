@@ -19,14 +19,39 @@ function nodeColor(node) {
   return 'oklch(78% 0.08 86)'
 }
 
-export default function RegistryFlow({ data, onFilter }) {
+function filterForNode(node) {
+  const value = node.label.toLowerCase().replaceAll(' ', '-').replaceAll('/', '').replaceAll('--', '-')
+  if (node.column === 'source') return { filters: { source: node.id.split(':')[1] }, meta: { type: 'Source', label: node.label, key: node.id } }
+  if (node.column === 'risk') return { filters: { risk: node.label.toLowerCase() }, meta: { type: 'Risk', label: node.label, key: node.id } }
+  if (node.column === 'bucket') return { filters: { bucket: value }, meta: { type: 'Recommendation', label: node.label, key: node.id } }
+  return null
+}
+
+function labelLines(label) {
+  const words = String(label || '').split(/\s+/)
+  const lines = []
+  let current = ''
+  words.forEach((word) => {
+    const next = current ? `${current} ${word}` : word
+    if (next.length > 19 && current) {
+      lines.push(current)
+      current = word
+    } else {
+      current = next
+    }
+  })
+  if (current) lines.push(current)
+  return lines.slice(0, 2)
+}
+
+export default function RegistryFlow({ data, onFilter, activeFilter }) {
   const nodes = data?.nodes || []
   const links = data?.links || []
   if (!nodes.length) return <Empty label="No attribution flow yet. Import a Lead Hygiene report to populate the graph." />
 
-  const width = 980
-  const height = 360
-  const margin = { top: 46, right: 36, bottom: 28, left: 36 }
+  const width = 1240
+  const height = 430
+  const margin = { top: 48, right: 42, bottom: 30, left: 42 }
   const columns = new Map(columnOrder.map((col) => [col, []]))
   nodes.forEach((node) => {
     if (!columns.has(node.column)) columns.set(node.column, [])
@@ -38,26 +63,25 @@ export default function RegistryFlow({ data, onFilter }) {
   columnOrder.forEach((col, colIndex) => {
     const items = columns.get(col) || []
     const x = margin.left + colIndex * ((width - margin.left - margin.right) / Math.max(1, columnOrder.length - 1))
-    const gap = 14
-    const itemHeight = Math.min(58, Math.max(34, (height - margin.top - margin.bottom - gap * Math.max(0, items.length - 1)) / Math.max(1, items.length)))
+    const gap = 16
+    const itemHeight = Math.min(70, Math.max(46, (height - margin.top - margin.bottom - gap * Math.max(0, items.length - 1)) / Math.max(1, items.length)))
     const totalHeight = items.length * itemHeight + Math.max(0, items.length - 1) * gap
     const startY = margin.top + Math.max(0, (height - margin.top - margin.bottom - totalHeight) / 2)
     items.forEach((node, index) => {
-      positioned.set(node.id, { ...node, x, y: startY + index * (itemHeight + gap), w: 152, h: itemHeight })
+      positioned.set(node.id, { ...node, x, y: startY + index * (itemHeight + gap), w: 204, h: itemHeight })
     })
   })
 
   const maxLink = Math.max(...links.map((link) => link.value), 1)
 
   function handleNodeClick(node) {
-    if (node.column === 'source') onFilter?.({ source: node.id.split(':')[1] })
-    if (node.column === 'risk') onFilter?.({ risk: node.label.toLowerCase() })
-    if (node.column === 'bucket') onFilter?.({ bucket: node.label.toLowerCase().replaceAll(' ', '-') })
+    const next = filterForNode(node)
+    if (next) onFilter?.(next.filters, next.meta)
   }
 
   return (
     <div style={{ overflowX: 'auto' }}>
-      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Registry attribution flow" style={{ width: '100%', minWidth: 820, height: 'auto', display: 'block' }}>
+      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Registry attribution flow" style={{ width: '100%', minWidth: 1080, height: 'auto', display: 'block' }}>
         <defs>
           <filter id="registry-flow-glow" x="-20%" y="-20%" width="140%" height="140%">
             <feGaussianBlur stdDeviation="2.5" result="blur" />
@@ -97,10 +121,15 @@ export default function RegistryFlow({ data, onFilter }) {
         })}
         {[...positioned.values()].map((node) => (
           <g key={node.id} onClick={() => handleNodeClick(node)} style={{ cursor: ['source', 'risk', 'bucket'].includes(node.column) ? 'pointer' : 'default' }}>
-            <rect x={node.x} y={node.y} width={node.w} height={node.h} rx="4" fill="oklch(18% 0.02 250)" stroke={nodeColor(node)} strokeWidth="1.2" filter="url(#registry-flow-glow)" />
+            <title>{node.label}: {node.count.toLocaleString()} households</title>
+            <rect x={node.x} y={node.y} width={node.w} height={node.h} rx="4" fill="oklch(18% 0.02 250)" stroke={activeFilter?.key === node.id ? 'var(--text)' : nodeColor(node)} strokeWidth={activeFilter?.key === node.id ? '2.4' : '1.2'} filter="url(#registry-flow-glow)" />
             <rect x={node.x} y={node.y} width="4" height={node.h} fill={nodeColor(node)} />
-            <text x={node.x + 13} y={node.y + 20} fill="var(--text)" fontFamily="var(--font-mono)" fontSize="12">{node.label}</text>
-            <text x={node.x + 13} y={node.y + node.h - 10} fill="var(--text-muted)" fontFamily="var(--font-mono)" fontSize="10">{node.count.toLocaleString()} records</text>
+            <text x={node.x + 13} y={node.y + 18} fill="var(--text)" fontFamily="var(--font-mono)" fontSize="12">
+              {labelLines(node.label).map((line, index) => (
+                <tspan key={line} x={node.x + 13} dy={index === 0 ? 0 : 14}>{line}</tspan>
+              ))}
+            </text>
+            <text x={node.x + 13} y={node.y + node.h - 10} fill="var(--text-muted)" fontFamily="var(--font-mono)" fontSize="10">{node.count.toLocaleString()} households</text>
           </g>
         ))}
       </svg>

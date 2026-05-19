@@ -427,6 +427,22 @@ body {
   max-width: none;
 }
 
+.registry-dashboard {
+  max-width: 1480px;
+}
+
+.registry-attribution-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 320px);
+  gap: 1rem;
+  align-items: start;
+}
+
+.registry-source-coverage-panel {
+  border-left: 1px solid var(--border-subtle);
+  padding-left: 1rem;
+}
+
 .dashboard > section {
   animation: fadeSlideIn 0.3s ease both;
 }
@@ -1317,6 +1333,17 @@ body {
 
   .section-title {
     font-size: 0.8rem;
+  }
+
+  .registry-attribution-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .registry-source-coverage-panel {
+    border-left: none;
+    border-top: 1px solid var(--border-subtle);
+    padding-left: 0;
+    padding-top: 1rem;
   }
 
   /* ── Section header row ── */

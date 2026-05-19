@@ -175,6 +175,15 @@ class RegistrySankeyTotals(BaseModel):
     links: int
 
 
+class RegistrySourceCoverage(BaseModel):
+    source: str
+    label: str
+    total: int
+    matched: int
+    missing: int
+    match_pct: float
+
+
 class RegistrySankeyOut(BaseModel):
     generated_at: datetime
     level: str
@@ -182,4 +191,6 @@ class RegistrySankeyOut(BaseModel):
     nodes: list[RegistrySankeyNode]
     links: list[RegistrySankeyLink]
     totals: RegistrySankeyTotals
+    source_coverage: list[RegistrySourceCoverage] = []
+    coverage_universe: int = 0
     truncated: bool = False

@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useAuthSafe as useAuth } from '../hooks/useClerkSafe'
 import LeadHygiene from '../components/LeadHygiene'
+import ActiveFilterBanner from '../components/registry/ActiveFilterBanner'
 import HouseholdDrawer from '../components/registry/HouseholdDrawer'
 import HouseholdTable from '../components/registry/HouseholdTable'
 import RegistryFlow from '../components/registry/RegistryFlow'
+import SourceCoverage from '../components/registry/SourceCoverage'
 import { Badge, DataTable, Empty, RiskBadge, Stat } from '../components/registry/RegistryBadges'
 
 const API_BASE = '/api/admin/registry'
@@ -37,6 +39,7 @@ export default function Registry() {
   const [searchResults, setSearchResults] = useState(null)
   const [detail, setDetail] = useState(null)
   const [filters, setFilters] = useState({ sort: 'latest' })
+  const [activeFilter, setActiveFilter] = useState(null)
   const [importResult, setImportResult] = useState(null)
   const [importMessage, setImportMessage] = useState('')
   const [error, setError] = useState('')
@@ -101,9 +104,10 @@ export default function Registry() {
     [leadHygieneReports, selectedReportId],
   )
 
-  async function applyFilters(nextFilters) {
+  async function applyFilters(nextFilters, filterMeta) {
     const merged = { ...filters, ...nextFilters }
     setFilters(merged)
+    if (filterMeta !== undefined) setActiveFilter(filterMeta)
     setTab('Households')
     setError('')
     try {
@@ -116,6 +120,7 @@ export default function Registry() {
   async function clearFilters() {
     const next = { sort: 'latest' }
     setFilters(next)
+    setActiveFilter(null)
     await loadHouseholds(next)
   }
 
@@ -213,7 +218,7 @@ export default function Registry() {
   )
 
   return (
-    <div className="dashboard" style={{ maxWidth: 1180 }}>
+    <div className="dashboard registry-dashboard" style={{ maxWidth: 1480 }}>
       <section style={{ marginBottom: '1rem' }}>
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap' }}>
           <div>
@@ -255,7 +260,14 @@ export default function Registry() {
               <div className="section-title" style={{ marginBottom: 0 }}>Registry Attribution Flow</div>
               <Badge>{flow?.totals?.households || 0} households</Badge>
             </div>
-            <RegistryFlow data={flow} onFilter={applyFilters} />
+            <ActiveFilterBanner filter={activeFilter} onClear={clearFilters} />
+            <div className="registry-attribution-grid">
+              <RegistryFlow data={flow} onFilter={applyFilters} activeFilter={activeFilter} />
+              <div className="registry-source-coverage-panel">
+                <div className="section-title" style={{ marginBottom: '0.75rem', paddingBottom: '0.5rem' }}>Source Coverage</div>
+                <SourceCoverage rows={flow?.source_coverage || []} />
+              </div>
+            </div>
           </section>
           {importPanel}
           <section className="section">
@@ -272,11 +284,12 @@ export default function Registry() {
 
       {tab === 'Households' && (
         <section className="section">
+          <ActiveFilterBanner filter={activeFilter} onClear={clearFilters} />
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap', alignItems: 'center', marginBottom: '0.75rem' }}>
             <div className="section-title" style={{ marginBottom: 0 }}>Households</div>
             <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
-              <button className={filters.risk === 'high' ? 'btn-primary' : 'btn-secondary'} type="button" onClick={() => applyFilters({ risk: filters.risk === 'high' ? '' : 'high' })}>High Risk</button>
-              <button className={filters.has_conflict ? 'btn-primary' : 'btn-secondary'} type="button" onClick={() => applyFilters({ has_conflict: !filters.has_conflict })}>Conflicts</button>
+              <button className={filters.risk === 'high' ? 'btn-primary' : 'btn-secondary'} type="button" onClick={() => applyFilters({ risk: filters.risk === 'high' ? '' : 'high' }, filters.risk === 'high' ? null : { type: 'Risk', label: 'High' })}>High Risk</button>
+              <button className={filters.has_conflict ? 'btn-primary' : 'btn-secondary'} type="button" onClick={() => applyFilters({ has_conflict: !filters.has_conflict }, filters.has_conflict ? null : { type: 'Signal', label: 'Conflicts' })}>Conflicts</button>
               <button className="btn-secondary" type="button" onClick={clearFilters}>Clear</button>
             </div>
           </div>
