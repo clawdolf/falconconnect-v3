@@ -4,6 +4,8 @@ import hashlib
 import json
 import os
 from dataclasses import asdict, dataclass
+from collections import Counter
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
@@ -100,11 +102,165 @@ async def summary(session: AsyncSession) -> dict[str, Any]:
     }
 
 
-async def list_households(session: AsyncSession, limit: int, offset: int) -> list[RegistryHousehold]:
+def _mask_phone(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+    digits = "".join(ch for ch in str(value) if ch.isdigit())
+    if len(digits) < 4:
+        return "masked"
+    return f"***-***-{digits[-4:]}"
+
+
+def _mask_email(value: Optional[str]) -> Optional[str]:
+    if not value or "@" not in value:
+        return None if not value else "masked"
+    local, domain = value.split("@", 1)
+    if not local:
+        return f"*@{domain}"
+    return f"{local[:1]}***@{domain}"
+
+
+def _source_display_label(source: Optional[str]) -> str:
+    labels = {
+        "close": "Close",
+        "ghl": "GHL",
+        "notion": "Notion",
+        "lead_hygiene": "Lead Hygiene",
+        "report": "Lead Hygiene",
+    }
+    return labels.get(str(source or "").lower(), str(source or "Unknown").replace("_", " ").title())
+
+
+def _household_sources(household: RegistryHousehold) -> list[str]:
+    sources = {record.source for record in household.external_records if record.source and record.source != "report"}
+    if household.derived_from:
+        sources.add(household.derived_from)
+    if household.recommendations:
+        sources.add("lead_hygiene")
+    return sorted(sources)
+
+
+def _bucket_counts(household: RegistryHousehold) -> dict[str, int]:
+    return dict(Counter(rec.recommendation_type or "other" for rec in household.recommendations))
+
+
+def _has_hard_stop(household: RegistryHousehold) -> bool:
+    for rec in household.recommendations:
+        evidence = rec.evidence if isinstance(rec.evidence, dict) else {}
+        flags = {str(flag).lower() for flag in evidence.get("risk_flags") or []}
+        if rec.recommendation_type in {"do-not-contact", "not-interested", "invalid"} or "hard_stop" in flags:
+            return True
+    for event in household.consent_events:
+        text = f"{event.event_type or ''} {event.evidence or ''}".lower()
+        if "hard_stop" in text or "do not contact" in text:
+            return True
+    return False
+
+
+def _rollup_household(household: RegistryHousehold, *, mask_contact: bool = True) -> dict[str, Any]:
+    contact_counts = Counter(contact.kind for contact in household.contact_methods)
+    sources = _household_sources(household)
+    buckets = _bucket_counts(household)
+    latest_seen_candidates = [
+        household.last_seen_at,
+        *(record.last_seen_at for record in household.external_records),
+        *(rec.updated_at or rec.created_at for rec in household.recommendations),
+        *(event.observed_at or event.created_at for event in household.consent_events),
+    ]
+    latest_seen_at = max((item for item in latest_seen_candidates if item), default=None)
+    latest_source = sources[-1] if sources else household.derived_from
+    hard_stop_count = 1 if _has_hard_stop(household) else 0
+    return {
+        "id": household.id,
+        "display_name": household.display_name,
+        "status": household.status,
+        "risk_level": household.risk_level,
+        "confidence": household.confidence,
+        "primary_phone": _mask_phone(household.primary_phone) if mask_contact else household.primary_phone,
+        "primary_email": _mask_email(household.primary_email) if mask_contact else household.primary_email,
+        "derived_from": household.derived_from,
+        "updated_at": household.updated_at,
+        "people_count": len(household.people),
+        "contact_method_count": len(household.contact_methods),
+        "phone_count": int(contact_counts.get("phone") or 0),
+        "email_count": int(contact_counts.get("email") or 0),
+        "address_count": int(contact_counts.get("address") or 0),
+        "sources": sources,
+        "source_count": len(sources),
+        "recommendation_count": len(household.recommendations),
+        "high_risk_recommendation_count": sum(1 for rec in household.recommendations if rec.risk_level == "high"),
+        "dnc_event_count": sum(1 for event in household.consent_events if "dnc" in (event.event_type or "").lower()),
+        "hard_stop_count": hard_stop_count,
+        "bucket_counts": buckets,
+        "latest_seen_at": latest_seen_at,
+        "latest_source_label": _source_display_label(latest_source) if latest_source else None,
+    }
+
+
+def household_row(household: RegistryHousehold) -> dict[str, Any]:
+    return _rollup_household(household, mask_contact=True)
+
+
+async def list_households(
+    session: AsyncSession,
+    limit: int,
+    offset: int,
+    *,
+    q: Optional[str] = None,
+    risk: Optional[str] = None,
+    source: Optional[str] = None,
+    bucket: Optional[str] = None,
+    has_dnc: Optional[bool] = None,
+    has_conflict: Optional[bool] = None,
+    sort: str = "latest",
+) -> list[dict[str, Any]]:
     result = await session.execute(
-        select(RegistryHousehold).order_by(RegistryHousehold.updated_at.desc()).offset(offset).limit(limit)
+        select(RegistryHousehold)
+        .options(
+            selectinload(RegistryHousehold.people),
+            selectinload(RegistryHousehold.contact_methods),
+            selectinload(RegistryHousehold.external_records),
+            selectinload(RegistryHousehold.recommendations),
+            selectinload(RegistryHousehold.consent_events),
+        )
     )
-    return list(result.scalars().all())
+    rows = [_rollup_household(household) for household in result.scalars().all()]
+
+    if q:
+        needle = q.strip().lower()
+        rows = [
+            row for row in rows
+            if needle in (row["display_name"] or "").lower()
+            or any(needle in str(item).lower() for item in row["sources"])
+        ]
+    if risk:
+        risks = {item.strip().lower() for item in risk.split(",") if item.strip()}
+        rows = [row for row in rows if str(row["risk_level"]).lower() in risks]
+    if source:
+        sources = {item.strip().lower() for item in source.split(",") if item.strip()}
+        rows = [row for row in rows if sources.intersection({item.lower() for item in row["sources"]})]
+    if bucket:
+        buckets = {item.strip().lower() for item in bucket.split(",") if item.strip()}
+        rows = [
+            row for row in rows
+            if buckets.intersection({item.lower() for item in row["bucket_counts"]})
+        ]
+    if has_dnc is not None:
+        rows = [row for row in rows if (row["dnc_event_count"] > 0) is has_dnc]
+    if has_conflict is not None:
+        rows = [row for row in rows if (row["high_risk_recommendation_count"] > 0 or row["hard_stop_count"] > 0) is has_conflict]
+
+    if sort == "risk":
+        rank = {"high": 0, "medium": 1, "low": 2, "unknown": 3}
+        rows.sort(key=lambda row: (rank.get(str(row["risk_level"]).lower(), 9), -(row["recommendation_count"] or 0)))
+    elif sort == "recommendations":
+        rows.sort(key=lambda row: row["recommendation_count"], reverse=True)
+    elif sort == "name":
+        rows.sort(key=lambda row: row["display_name"].lower())
+    else:
+        rows.sort(key=lambda row: row["latest_seen_at"] or row["updated_at"] or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+
+    return rows[offset:offset + limit]
 
 
 async def household_detail(session: AsyncSession, household_id: int) -> Optional[RegistryHousehold]:
@@ -119,6 +275,162 @@ async def household_detail(session: AsyncSession, household_id: int) -> Optional
             selectinload(RegistryHousehold.consent_events),
         )
     )
+
+
+def _bucket_label(bucket: str) -> str:
+    labels = {
+        "do-not-contact": "Do not contact",
+        "not-interested": "Not interested",
+        "invalid": "Invalid",
+        "needs-review": "Needs review",
+        "duplicate": "Duplicate",
+        "missing-phone": "Missing phone",
+        "re-engage-ready": "Re-engage ready",
+        "already-automated": "Already automated",
+        "recently-contacted": "Recently contacted",
+        "existing-client": "Existing client",
+    }
+    return labels.get(bucket, bucket.replace("_", " ").replace("-", " ").title() if bucket else "Other")
+
+
+def _safe_node_id(column: str, value: str) -> str:
+    cleaned = "".join(ch if ch.isalnum() else "_" for ch in value.lower()).strip("_")
+    return f"{column}:{cleaned or 'unknown'}"
+
+
+def _as_naive_utc(value: Optional[datetime]) -> Optional[datetime]:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value
+    return value.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+async def sankey(
+    session: AsyncSession,
+    *,
+    from_date: Optional[datetime] = None,
+    to_date: Optional[datetime] = None,
+    sources: Optional[list[str]] = None,
+    level: str = "household",
+    top_n: int = 8,
+    include_unknown_risk: bool = True,
+) -> dict[str, Any]:
+    result = await session.execute(
+        select(RegistryHousehold)
+        .options(
+            selectinload(RegistryHousehold.people),
+            selectinload(RegistryHousehold.contact_methods),
+            selectinload(RegistryHousehold.external_records),
+            selectinload(RegistryHousehold.recommendations),
+            selectinload(RegistryHousehold.consent_events),
+        )
+    )
+    households = list(result.scalars().all())
+    source_filter = {item.strip().lower() for item in (sources or []) if item and item.strip()}
+
+    filtered: list[RegistryHousehold] = []
+    from_cmp = _as_naive_utc(from_date)
+    to_cmp = _as_naive_utc(to_date)
+    for household in households:
+        seen_at = _as_naive_utc(household.last_seen_at or household.updated_at or household.created_at)
+        if from_cmp and seen_at and seen_at < from_cmp:
+            continue
+        if to_cmp and seen_at and seen_at > to_cmp:
+            continue
+        household_sources = _household_sources(household)
+        if source_filter and not source_filter.intersection({item.lower() for item in household_sources}):
+            continue
+        if not include_unknown_risk and (household.risk_level or "unknown") == "unknown":
+            continue
+        filtered.append(household)
+
+    node_counts: Counter[tuple[str, str]] = Counter()
+    link_counts: Counter[tuple[tuple[str, str], tuple[str, str]]] = Counter()
+    bucket_totals: Counter[str] = Counter()
+    for household in filtered:
+        household_sources = _household_sources(household) or ["unknown"]
+        risk = household.risk_level or "unknown"
+        buckets = _bucket_counts(household) or {"other": 1}
+        for bucket, count in buckets.items():
+            bucket_totals[bucket] += count
+        primary_buckets = [bucket for bucket, _ in Counter(buckets).most_common(max(1, top_n))]
+        hard_stop = _has_hard_stop(household)
+        status = "locked" if hard_stop else "proposed"
+
+        # Source overlap is real, so source -> risk links are counted once per
+        # household/source pair. Downstream risk/bucket/state counts must stay
+        # household-level or multi-source households inflate every later column.
+        node_counts[("risk", risk)] += 1
+        node_counts[("state", status)] += 1
+        for source in household_sources:
+            if source_filter and source.lower() not in source_filter:
+                continue
+            node_counts[("source", source)] += 1
+            link_counts[(("source", source), ("risk", risk))] += 1
+        for bucket in primary_buckets:
+            node_counts[("bucket", bucket)] += 1
+            link_counts[(("risk", risk), ("bucket", bucket))] += 1
+            link_counts[(("bucket", bucket), ("state", status))] += 1
+
+    top_buckets = {bucket for bucket, _ in bucket_totals.most_common(max(1, top_n))}
+    if top_buckets:
+        remapped_link_counts: Counter[tuple[tuple[str, str], tuple[str, str]]] = Counter()
+        remapped_node_counts: Counter[tuple[str, str]] = Counter()
+        for (column, value), count in node_counts.items():
+            mapped = "other" if column == "bucket" and value not in top_buckets else value
+            remapped_node_counts[(column, mapped)] += count
+        for (left, right), count in link_counts.items():
+            left = (left[0], "other") if left[0] == "bucket" and left[1] not in top_buckets else left
+            right = (right[0], "other") if right[0] == "bucket" and right[1] not in top_buckets else right
+            remapped_link_counts[(left, right)] += count
+        node_counts = remapped_node_counts
+        link_counts = remapped_link_counts
+
+    labels = {
+        "source": _source_display_label,
+        "risk": lambda value: value.title(),
+        "bucket": _bucket_label,
+        "state": lambda value: "Locked / review-only" if value == "locked" else "Proposed",
+    }
+    nodes = [
+        {
+            "id": _safe_node_id(column, value),
+            "label": labels[column](value),
+            "column": column,
+            "count": count,
+        }
+        for (column, value), count in sorted(node_counts.items(), key=lambda item: (item[0][0], item[0][1]))
+    ]
+    links = [
+        {
+            "source": _safe_node_id(left[0], left[1]),
+            "target": _safe_node_id(right[0], right[1]),
+            "value": count,
+        }
+        for (left, right), count in sorted(link_counts.items(), key=lambda item: (item[0][0], item[0][1]))
+    ]
+    return {
+        "generated_at": datetime.now(timezone.utc),
+        "level": level,
+        "filters": {
+            "from": from_date,
+            "to": to_date,
+            "sources": sorted(source_filter),
+            "include_unknown_risk": include_unknown_risk,
+            "top_n": top_n,
+        },
+        "nodes": nodes,
+        "links": links,
+        "totals": {
+            "households": len(filtered),
+            "people": sum(len(household.people) for household in filtered),
+            "contact_methods": sum(len(household.contact_methods) for household in filtered),
+            "recommendations": sum(len(household.recommendations) for household in filtered),
+            "links": len(links),
+        },
+        "truncated": len(bucket_totals) > top_n,
+    }
 
 
 async def list_people(session: AsyncSession, limit: int, offset: int) -> list[RegistryPerson]:
@@ -177,6 +489,13 @@ async def search(session: AsyncSession, q: str, limit: int = 25) -> dict[str, li
 
     household_result = await session.execute(
         select(RegistryHousehold)
+        .options(
+            selectinload(RegistryHousehold.people),
+            selectinload(RegistryHousehold.contact_methods),
+            selectinload(RegistryHousehold.external_records),
+            selectinload(RegistryHousehold.recommendations),
+            selectinload(RegistryHousehold.consent_events),
+        )
         .where(
             or_(
                 RegistryHousehold.display_name.ilike(f"%{name or q}%"),

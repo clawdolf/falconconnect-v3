@@ -6,6 +6,8 @@ never mutates Close, GHL, or Notion.
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,8 +18,6 @@ from services.registry import service
 from services.registry.schemas import (
     RegistryConnectionStatus,
     RegistryConsentEventOut,
-    RegistryContactMethodOut,
-    RegistryExternalRecordOut,
     RegistryHouseholdDetail,
     RegistryHouseholdOut,
     RegistryImportSummary,
@@ -25,6 +25,7 @@ from services.registry.schemas import (
     RegistryPersonDetail,
     RegistryPersonOut,
     RegistryRecommendationOut,
+    RegistrySankeyOut,
 )
 
 router = APIRouter()
@@ -44,15 +45,57 @@ async def get_summary(
     return await service.summary(session)
 
 
-@router.get("/households", response_model=list[RegistryHouseholdOut])
-async def get_households(
-    limit: int = Query(50, ge=1, le=200),
-    offset: int = Query(0, ge=0),
+@router.get("/sankey", response_model=RegistrySankeyOut)
+async def get_sankey(
+    from_: datetime | None = Query(None, alias="from"),
+    to: datetime | None = Query(None),
+    sources: str | None = Query(None),
+    level: str = Query("household", pattern="^(household|row)$"),
+    top_n: int = Query(8, ge=1, le=20),
+    include_unknown_risk: bool = Query(True),
     _user=Depends(require_admin),
     session: AsyncSession = Depends(get_session),
 ):
     _enabled()
-    return await service.list_households(session, limit=limit, offset=offset)
+    source_list = [item.strip() for item in sources.split(",")] if sources else None
+    return await service.sankey(
+        session,
+        from_date=from_,
+        to_date=to,
+        sources=source_list,
+        level=level,
+        top_n=top_n,
+        include_unknown_risk=include_unknown_risk,
+    )
+
+
+@router.get("/households", response_model=list[RegistryHouseholdOut])
+async def get_households(
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    q: str | None = Query(None, max_length=256),
+    risk: str | None = Query(None, max_length=128),
+    source: str | None = Query(None, max_length=128),
+    bucket: str | None = Query(None, max_length=256),
+    has_dnc: bool | None = Query(None),
+    has_conflict: bool | None = Query(None),
+    sort: str = Query("latest", pattern="^(latest|risk|recommendations|name)$"),
+    _user=Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+):
+    _enabled()
+    return await service.list_households(
+        session,
+        limit=limit,
+        offset=offset,
+        q=q,
+        risk=risk,
+        source=source,
+        bucket=bucket,
+        has_dnc=has_dnc,
+        has_conflict=has_conflict,
+        sort=sort,
+    )
 
 
 @router.get("/households/{household_id}", response_model=RegistryHouseholdDetail)
@@ -109,10 +152,13 @@ async def search(
     _enabled()
     results = await service.search(session, q=q, limit=limit)
     return {
-        "households": [RegistryHouseholdOut.model_validate(item) for item in results["households"]],
+        "households": [RegistryHouseholdOut.model_validate(service.household_row(item)) for item in results["households"]],
         "people": [RegistryPersonOut.model_validate(item) for item in results["people"]],
-        "contact_methods": [RegistryContactMethodOut.model_validate(item) for item in results["contact_methods"]],
-        "external_records": [RegistryExternalRecordOut.model_validate(item) for item in results["external_records"]],
+        # Search is a household/person discovery surface. Keep raw contact methods
+        # and external IDs out of the payload; full contact values are available
+        # only inside the admin household detail drawer.
+        "contact_methods": [],
+        "external_records": [],
     }
 
 

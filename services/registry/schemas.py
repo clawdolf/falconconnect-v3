@@ -18,6 +18,20 @@ class RegistryHouseholdOut(BaseModel):
     primary_email: Optional[str] = None
     derived_from: Optional[str] = None
     updated_at: Optional[datetime] = None
+    people_count: int = 0
+    contact_method_count: int = 0
+    phone_count: int = 0
+    email_count: int = 0
+    address_count: int = 0
+    sources: list[str] = []
+    source_count: int = 0
+    recommendation_count: int = 0
+    high_risk_recommendation_count: int = 0
+    dnc_event_count: int = 0
+    hard_stop_count: int = 0
+    bucket_counts: dict[str, int] = {}
+    latest_seen_at: Optional[datetime] = None
+    latest_source_label: Optional[str] = None
 
 
 class RegistryPersonOut(BaseModel):
@@ -138,3 +152,34 @@ class RegistryConnectionStatus(BaseModel):
     configured: bool
     mode: str
     secret: str = "masked"
+
+
+class RegistrySankeyNode(BaseModel):
+    id: str
+    label: str
+    column: str
+    count: int
+
+
+class RegistrySankeyLink(BaseModel):
+    source: str
+    target: str
+    value: int
+
+
+class RegistrySankeyTotals(BaseModel):
+    households: int
+    people: int
+    contact_methods: int
+    recommendations: int
+    links: int
+
+
+class RegistrySankeyOut(BaseModel):
+    generated_at: datetime
+    level: str
+    filters: dict[str, Any]
+    nodes: list[RegistrySankeyNode]
+    links: list[RegistrySankeyLink]
+    totals: RegistrySankeyTotals
+    truncated: bool = False

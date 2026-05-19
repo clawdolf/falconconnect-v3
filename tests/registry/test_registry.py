@@ -26,7 +26,6 @@ from middleware.auth import require_auth
 from routers.registry import router
 import routers.registry as registry_router
 from services import lead_hygiene_jobs as jobs
-from services.lead_hygiene import normalize_phone
 from services.lead_hygiene_jobs import JobRecord
 
 HAS_AIOSQLITE = importlib.util.find_spec("aiosqlite") is not None
@@ -230,17 +229,29 @@ def test_import_is_idempotent_and_search_detail_work(tmp_path, monkeypatch):
 
     phone_search = client.get("/api/admin/registry/search?q=4805550101")
     assert phone_search.status_code == 200
-    assert phone_search.json()["contact_methods"][0]["normalized_value"] == normalize_phone("4805550101")
+    phone_body = phone_search.json()
+    assert phone_body["contact_methods"] == []
+    assert phone_body["external_records"] == []
+    assert phone_body["households"][0]["primary_phone"].startswith("***-***-")
+    assert "4805550101" not in json.dumps(phone_body)
 
     email_search = client.get("/api/admin/registry/search?q=grace@example.com")
     assert email_search.status_code == 200
-    assert email_search.json()["contact_methods"][0]["normalized_value"] == "grace@example.com"
+    email_body = email_search.json()
+    assert email_body["contact_methods"] == []
+    assert email_body["external_records"] == []
+    assert "grace@example.com" not in json.dumps(email_body)
 
     name_search = client.get("/api/admin/registry/search?q=Ada")
     assert name_search.status_code == 200
     assert name_search.json()["people"][0]["display_name"] == "Ada Lovelace"
 
     households = client.get("/api/admin/registry/households").json()
+    assert households[0]["people_count"] >= 1
+    assert households[0]["contact_method_count"] >= 1
+    assert households[0]["primary_phone"].startswith("***-***-")
+    assert "@" in households[0]["primary_email"]
+    assert "ada@example.com" not in json.dumps(households)
     detail = client.get(f"/api/admin/registry/households/{households[0]['id']}")
     assert detail.status_code == 200
     body = detail.json()
@@ -249,6 +260,107 @@ def test_import_is_idempotent_and_search_detail_work(tmp_path, monkeypatch):
     assert body["external_records"]
     assert body["recommendations"]
     assert body["consent_events"]
+    assert any(contact["normalized_value"].endswith(("0101", "0102")) for contact in body["contact_methods"])
+
+
+def test_sankey_empty_graph(monkeypatch):
+    if not HAS_AIOSQLITE:
+        import pytest
+        pytest.skip("aiosqlite is not installed in this local environment")
+    monkeypatch.setenv("CLERK_ADMIN_USER_ID", "user_3ASrwDOrSTaDxCus6f1B5lnDsgz")
+    sf = _run(_session_factory())
+    client = TestClient(_make_app(sf))
+
+    res = client.get("/api/admin/registry/sankey")
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["nodes"] == []
+    assert body["links"] == []
+    assert body["totals"]["households"] == 0
+    assert body["level"] == "household"
+
+
+def test_sankey_fixture_counts_and_no_raw_pii(tmp_path, monkeypatch):
+    if not HAS_AIOSQLITE:
+        import pytest
+        pytest.skip("aiosqlite is not installed in this local environment")
+    monkeypatch.setenv("CLERK_ADMIN_USER_ID", "user_3ASrwDOrSTaDxCus6f1B5lnDsgz")
+    job_id = _install_report(tmp_path, monkeypatch)
+    sf = _run(_session_factory())
+    client = TestClient(_make_app(sf))
+    assert client.post(f"/api/admin/registry/imports/lead-hygiene/{job_id}").status_code == 200
+
+    res = client.get("/api/admin/registry/sankey")
+    assert res.status_code == 200, res.text
+    body = res.json()
+    labels = {node["label"]: node["count"] for node in body["nodes"]}
+    assert body["totals"]["households"] == 2
+    assert labels["Close"] == 2
+    assert labels["GHL"] == 1
+    assert labels["Notion"] == 1
+    assert labels["Lead Hygiene"] == 2
+    assert labels["High"] >= 1
+    assert labels["Medium"] >= 1
+    assert labels["Needs review"] >= 1
+    assert labels["Do not contact"] >= 1
+    risk_to_bucket_total = sum(
+        link["value"] for link in body["links"]
+        if link["source"].startswith("risk:") and link["target"].startswith("bucket:")
+    )
+    bucket_to_state_total = sum(
+        link["value"] for link in body["links"]
+        if link["source"].startswith("bucket:") and link["target"].startswith("state:")
+    )
+    assert risk_to_bucket_total == body["totals"]["households"]
+    assert bucket_to_state_total == body["totals"]["households"]
+    payload_text = json.dumps(body)
+    forbidden = [
+        "Ada",
+        "Grace",
+        "4805550101",
+        "4805550102",
+        "ada@example.com",
+        "grace@example.com",
+        "lead_close_1",
+        "ghl_1",
+        "notion_1",
+    ]
+    assert not any(value in payload_text for value in forbidden)
+
+
+def test_household_rollups_and_filters(tmp_path, monkeypatch):
+    if not HAS_AIOSQLITE:
+        import pytest
+        pytest.skip("aiosqlite is not installed in this local environment")
+    monkeypatch.setenv("CLERK_ADMIN_USER_ID", "user_3ASrwDOrSTaDxCus6f1B5lnDsgz")
+    job_id = _install_report(tmp_path, monkeypatch)
+    sf = _run(_session_factory())
+    client = TestClient(_make_app(sf))
+    assert client.post(f"/api/admin/registry/imports/lead-hygiene/{job_id}").status_code == 200
+
+    households = client.get("/api/admin/registry/households?sort=risk").json()
+    assert len(households) == 2
+    grace = next(item for item in households if item["display_name"] == "Grace Hopper")
+    ada = next(item for item in households if item["display_name"] == "Ada Lovelace")
+    assert grace["people_count"] == 1
+    assert grace["phone_count"] == 1
+    assert grace["email_count"] == 1
+    assert grace["recommendation_count"] == 1
+    assert grace["high_risk_recommendation_count"] == 1
+    assert grace["hard_stop_count"] == 1
+    assert grace["bucket_counts"]["do-not-contact"] == 1
+    assert "close" in grace["sources"]
+    assert "lead_hygiene" in grace["sources"]
+    assert ada["source_count"] >= 3
+
+    high = client.get("/api/admin/registry/households?risk=high").json()
+    assert [item["display_name"] for item in high] == ["Grace Hopper"]
+    close = client.get("/api/admin/registry/households?source=close").json()
+    assert {item["display_name"] for item in close} == {"Ada Lovelace", "Grace Hopper"}
+    bucket = client.get("/api/admin/registry/households?bucket=needs-review").json()
+    assert [item["display_name"] for item in bucket] == ["Ada Lovelace"]
+    conflict = client.get("/api/admin/registry/households?has_conflict=true").json()
+    assert [item["display_name"] for item in conflict] == ["Grace Hopper"]
 
 
 def test_duplicate_phone_different_last_names_do_not_merge(tmp_path, monkeypatch):
@@ -292,7 +404,11 @@ def test_duplicate_phone_different_last_names_do_not_merge(tmp_path, monkeypatch
 
     phone_search = client.get("/api/admin/registry/search?q=4805550101")
     assert phone_search.status_code == 200
-    assert len(phone_search.json()["contact_methods"]) == 2
+    phone_body = phone_search.json()
+    assert phone_body["contact_methods"] == []
+    assert phone_body["external_records"] == []
+    assert {item["display_name"] for item in phone_body["households"]} == {"Ada Lovelace", "Grace Hopper"}
+    assert "4805550101" not in json.dumps(phone_body)
 
 
 def test_connections_masks_secrets(monkeypatch):
