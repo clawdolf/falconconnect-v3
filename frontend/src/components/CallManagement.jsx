@@ -145,13 +145,19 @@ function CallManagement() {
 
   async function addCarrier() {
     if (!confId) return
+    const phone = carrierPhone.trim()
+    if (!phone) {
+      setError('Enter a carrier phone number first.')
+      return
+    }
     setBusy('carrier')
     setError('')
     try {
+      addLog(`Dialing carrier: ${phone}.`)
       const res = await fetch(`${API}/conference/${confId}/carrier`, {
         method: 'POST',
         headers: authHeaders(),
-        body: JSON.stringify({ carrier_phone: carrierPhone, carrier_label: carrierChoice }),
+        body: JSON.stringify({ carrier_phone: phone, carrier_label: carrierChoice }),
       })
       if (!res.ok) {
         const body = await res.json().catch(() => ({}))
@@ -178,7 +184,7 @@ function CallManagement() {
   function selectCarrier(label) {
     setCarrierChoice(label)
     const found = FAVORITE_CARRIERS.find((carrier) => carrier.label === label)
-    setCarrierPhone(found?.phone || '')
+    if (found?.phone) setCarrierPhone(found.phone)
   }
 
   const participants = useMemo(() => ([
@@ -253,16 +259,18 @@ function CallManagement() {
             <span style={styles.monoMuted}>Outbound caller ID stays on bridge number</span>
           </div>
           <div style={styles.carrierGrid}>
-            <Field label="Favorite carrier">
-              <select style={styles.input} value={carrierChoice} onChange={(e) => selectCarrier(e.target.value)}>
-                {FAVORITE_CARRIERS.map((carrier) => <option key={carrier.label}>{carrier.label}</option>)}
-              </select>
-            </Field>
-            <Field label="Carrier phone">
-              <input style={styles.input} type="tel" value={carrierPhone} onChange={(e) => setCarrierPhone(e.target.value)} placeholder="+1..." />
-            </Field>
-            <button type="button" style={styles.primaryButton} disabled={busy === 'carrier' || !carrierPhone} onClick={addCarrier}>
-              Add Carrier
+            <div style={styles.carrierFields}>
+              <Field label="Favorite carrier">
+                <select style={styles.input} value={carrierChoice} onChange={(e) => selectCarrier(e.target.value)}>
+                  {FAVORITE_CARRIERS.map((carrier) => <option key={carrier.label}>{carrier.label}</option>)}
+                </select>
+              </Field>
+              <Field label="Carrier phone">
+                <input style={styles.input} type="tel" value={carrierPhone} onChange={(e) => setCarrierPhone(e.target.value)} placeholder="+1..." />
+              </Field>
+            </div>
+            <button type="button" style={styles.primaryButton} disabled={busy === 'carrier' || !carrierPhone.trim()} onClick={addCarrier}>
+              {busy === 'carrier' ? 'Dialing...' : 'Add Carrier'}
             </button>
           </div>
         </section>
@@ -406,7 +414,8 @@ const styles = {
   formGrid: { display: 'grid', gridTemplateColumns: 'minmax(220px, 1fr) minmax(220px, 1fr) auto', gap: '0.75rem', alignItems: 'end' },
   liveFindRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem', marginTop: '0.75rem', paddingTop: '0.75rem', borderTop: '1px solid var(--border-subtle)', flexWrap: 'wrap' },
   workflowGrid: { display: 'grid', gridTemplateColumns: 'minmax(260px, 1fr) auto auto', gap: '0.75rem', alignItems: 'stretch' },
-  carrierGrid: { display: 'grid', gridTemplateColumns: 'minmax(220px, 280px) minmax(220px, 1fr) auto', gap: '0.75rem', alignItems: 'end' },
+  carrierGrid: { display: 'grid', gridTemplateColumns: '1fr auto', gap: '0.75rem', alignItems: 'end' },
+  carrierFields: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', alignItems: 'end' },
   field: { display: 'flex', flexDirection: 'column', gap: '0.25rem' },
   label: { color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: '0.66rem', textTransform: 'uppercase', letterSpacing: '0.04em' },
   input: { width: '100%', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 2, color: 'var(--text)', fontFamily: 'var(--font-mono)', fontSize: '0.8rem', padding: '0.55rem 0.6rem' },
