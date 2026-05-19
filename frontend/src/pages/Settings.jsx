@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useAuthSafe as useAuth } from '../hooks/useClerkSafe'
 import { useUserSafe as useUser } from '../hooks/useClerkSafe'
 
 const THEME_KEY = 'fc_theme'
@@ -13,6 +14,8 @@ function applyTheme(theme) {
 
 export default function Settings() {
   const { user } = useUser()
+  const { getToken } = useAuth()
+  const [registryConnections, setRegistryConnections] = useState([])
 
   const [isLight, setIsLight] = useState(() => {
     const stored = localStorage.getItem(THEME_KEY)
@@ -23,6 +26,25 @@ export default function Settings() {
   useEffect(() => {
     applyTheme(isLight ? 'light' : 'dark')
   }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    async function loadConnections() {
+      try {
+        const token = getToken ? await getToken() : null
+        const res = await fetch('/api/admin/registry/connections', {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        })
+        if (!res.ok) return
+        const data = await res.json()
+        if (!cancelled) setRegistryConnections(data)
+      } catch {
+        if (!cancelled) setRegistryConnections([])
+      }
+    }
+    loadConnections()
+    return () => { cancelled = true }
+  }, [getToken])
 
   function handleThemeToggle() {
     const next = !isLight
@@ -204,6 +226,37 @@ export default function Settings() {
                 connected
               </span>
             </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Registry Connections */}
+      <div className="section" style={{ marginBottom: '1.25rem' }}>
+        <div className="section-title">Registry Connections</div>
+
+        <div style={{ display: 'grid', gap: '0.65rem' }}>
+          {(registryConnections.length ? registryConnections : [
+            { source: 'close', configured: false, mode: 'read-only', secret: 'masked' },
+            { source: 'ghl', configured: false, mode: 'read-only', secret: 'masked' },
+            { source: 'notion', configured: false, mode: 'csv/read-only', secret: 'masked' },
+          ]).map((conn) => (
+            <label key={conn.source} style={{
+              display: 'grid',
+              gap: '0.25rem',
+              fontFamily: 'var(--font-mono)',
+              fontSize: '0.65rem',
+              color: 'var(--text-muted)',
+              textTransform: 'uppercase',
+              letterSpacing: '0.06em',
+            }}>
+              {conn.source} credential · {conn.mode} · {conn.configured ? 'configured' : 'not configured'}
+              <input
+                className="input"
+                disabled
+                readOnly
+                value={conn.configured ? 'Configured in server environment' : 'Not configured'}
+              />
+            </label>
           ))}
         </div>
       </div>

@@ -8,10 +8,9 @@ import Team from './components/Team'
 import Analytics from './components/Analytics'
 import Campaigns from './components/Campaigns'
 import Research from './components/Research'
-import GHLDashboard from './pages/GHLDashboard'
 import SmsTemplates from './components/SmsTemplates'
 import CallManagement from './components/CallManagement'
-import LeadHygiene from './components/LeadHygiene'
+import Registry from './pages/Registry'
 import Settings from './pages/Settings'
 
 const PUBLISHABLE_KEY = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY
@@ -23,12 +22,11 @@ const NAV_ITEMS = [
   { key: 'licenses', label: 'Licenses' },
   { key: 'team', label: 'Team' },
   { key: 'analytics', label: 'Analytics' },
-  { key: 'ghl-intel', label: 'GHL Intel' },
+  { key: 'registry', label: 'Registry' },
   { key: 'campaigns', label: 'Campaigns' },
   { key: 'research', label: 'Research' },
   { key: 'sms-templates', label: 'SMS Templates' },
   { key: 'calls', label: 'Call Management' },
-  { key: 'lead-hygiene', label: 'Lead Hygiene' },
   { key: 'settings', label: 'Settings' },
 ]
 
@@ -42,8 +40,8 @@ function PageContent({ currentPage, onNavigate }) {
       return <Team />
     case 'analytics':
       return <Analytics />
-    case 'ghl-intel':
-      return <GHLDashboard />
+    case 'registry':
+      return <Registry />
     case 'campaigns':
       return <Campaigns onNavigate={onNavigate} />
     case 'research':
@@ -52,8 +50,6 @@ function PageContent({ currentPage, onNavigate }) {
       return <SmsTemplates />
     case 'calls':
       return <CallManagement />
-    case 'lead-hygiene':
-      return <LeadHygiene />
     case 'settings':
       return <Settings />
     default:

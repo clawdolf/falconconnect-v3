@@ -10,13 +10,18 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     Integer,
+    JSON,
     Numeric,
     String,
     Text,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import DeclarativeBase, relationship
+
+
+RegistryJSON = JSON().with_variant(JSONB, "postgresql")
 
 
 class Base(DeclarativeBase):
@@ -470,3 +475,169 @@ class GHLComplianceFlag(Base):
     tags = Column(ARRAY(Text), nullable=True)
     created_at: datetime = Column(DateTime(timezone=True), server_default=func.now())
     resolved: bool = Column(Boolean, default=False)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Registry v1 — local-only identity review cache
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+class RegistryHousehold(Base):
+    """Parent identity group for people, contacts, and source records."""
+
+    __tablename__ = "registry_households"
+
+    id: int = Column(Integer, primary_key=True, autoincrement=True)
+    display_name: str = Column(String(256), nullable=False, index=True)
+    status: str = Column(String(32), default="active", nullable=False, index=True)
+    risk_level: str = Column(String(32), default="unknown", nullable=False, index=True)
+    confidence: float = Column(Float, default=0.0)
+    primary_phone: str = Column(String(32), nullable=True, index=True)
+    primary_email: str = Column(String(256), nullable=True, index=True)
+    derived_from: str = Column(String(64), nullable=True)
+    first_seen_at: datetime = Column(DateTime(timezone=True), server_default=func.now())
+    last_seen_at: datetime = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    created_at: datetime = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at: datetime = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    people = relationship("RegistryPerson", back_populates="household", lazy="selectin")
+    contact_methods = relationship("RegistryContactMethod", back_populates="household", lazy="selectin")
+    external_records = relationship("RegistryExternalRecord", back_populates="household", lazy="selectin")
+    recommendations = relationship("RegistryRecommendation", back_populates="household", lazy="selectin")
+    consent_events = relationship("RegistryConsentEvent", back_populates="household", lazy="selectin")
+
+
+class RegistryPerson(Base):
+    """Person record inside a registry household."""
+
+    __tablename__ = "registry_people"
+
+    id: int = Column(Integer, primary_key=True, autoincrement=True)
+    household_id: int = Column(Integer, ForeignKey("registry_households.id"), nullable=False, index=True)
+    display_name: str = Column(String(256), nullable=False, index=True)
+    first_name: str = Column(String(128), nullable=True)
+    last_name: str = Column(String(128), nullable=True)
+    role: str = Column(String(64), default="primary")
+    dnc_status: str = Column(String(64), default="unknown")
+    consent_status: str = Column(String(64), default="unknown")
+    created_at: datetime = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at: datetime = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    household = relationship("RegistryHousehold", back_populates="people")
+    contact_methods = relationship("RegistryContactMethod", back_populates="person", lazy="selectin")
+
+
+class RegistryContactMethod(Base):
+    """Normalized local phone, email, or address attached to a household/person."""
+
+    __tablename__ = "registry_contact_methods"
+
+    id: int = Column(Integer, primary_key=True, autoincrement=True)
+    household_id: int = Column(Integer, ForeignKey("registry_households.id"), nullable=False, index=True)
+    person_id: int = Column(Integer, ForeignKey("registry_people.id"), nullable=True, index=True)
+    kind: str = Column(String(32), nullable=False, index=True)
+    raw_value: str = Column(String(512), nullable=False)
+    normalized_value: str = Column(String(512), nullable=False, index=True)
+    validity_status: str = Column(String(64), default="unknown")
+    consent_status: str = Column(String(64), default="unknown")
+    is_primary: bool = Column(Boolean, default=False)
+    created_at: datetime = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at: datetime = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("household_id", "kind", "normalized_value", name="uq_registry_contact_method_identity"),
+    )
+
+    household = relationship("RegistryHousehold", back_populates="contact_methods")
+    person = relationship("RegistryPerson", back_populates="contact_methods")
+
+
+class RegistryExternalRecord(Base):
+    """External source pointer. It stores identifiers only, never upstream writes."""
+
+    __tablename__ = "registry_external_records"
+
+    id: int = Column(Integer, primary_key=True, autoincrement=True)
+    household_id: int = Column(Integer, ForeignKey("registry_households.id"), nullable=True, index=True)
+    person_id: int = Column(Integer, ForeignKey("registry_people.id"), nullable=True, index=True)
+    contact_method_id: int = Column(Integer, ForeignKey("registry_contact_methods.id"), nullable=True, index=True)
+    source: str = Column(String(32), nullable=False, index=True)
+    external_type: str = Column(String(64), nullable=False)
+    external_id: str = Column(String(256), nullable=False, index=True)
+    match_basis: str = Column(String(64), nullable=True)
+    match_confidence: float = Column(Float, nullable=True)
+    match_reason: str = Column(Text, nullable=True)
+    payload_hash: str = Column(String(128), nullable=True)
+    first_seen_at: datetime = Column(DateTime(timezone=True), server_default=func.now())
+    last_seen_at: datetime = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    created_at: datetime = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at: datetime = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("source", "external_type", "external_id", name="uq_registry_external_record_source_id"),
+    )
+
+    household = relationship("RegistryHousehold", back_populates="external_records")
+
+
+class RegistrySourceSnapshot(Base):
+    """Immutable local payload snapshot for an import/report row."""
+
+    __tablename__ = "registry_source_snapshots"
+
+    id: int = Column(Integer, primary_key=True, autoincrement=True)
+    source: str = Column(String(32), nullable=False, index=True)
+    source_type: str = Column(String(64), nullable=True)
+    source_ref: str = Column(String(256), nullable=True, index=True)
+    payload_hash: str = Column(String(128), unique=True, nullable=False, index=True)
+    payload = Column(RegistryJSON, nullable=False)
+    pulled_at: datetime = Column(DateTime(timezone=True), server_default=func.now())
+    created_at: datetime = Column(DateTime(timezone=True), server_default=func.now())
+    record_count: int = Column(Integer, nullable=True)
+    notes: str = Column(Text, nullable=True)
+
+
+class RegistryRecommendation(Base):
+    """Read-only proposed action generated from local evidence."""
+
+    __tablename__ = "registry_recommendations"
+
+    id: int = Column(Integer, primary_key=True, autoincrement=True)
+    household_id: int = Column(Integer, ForeignKey("registry_households.id"), nullable=False, index=True)
+    person_id: int = Column(Integer, ForeignKey("registry_people.id"), nullable=True, index=True)
+    external_record_id: int = Column(Integer, ForeignKey("registry_external_records.id"), nullable=True)
+    source_snapshot_id: int = Column(Integer, ForeignKey("registry_source_snapshots.id"), nullable=True, index=True)
+    recommendation_type: str = Column(String(128), nullable=False, index=True)
+    status: str = Column(String(64), default="proposed", nullable=False, index=True)
+    risk_level: str = Column(String(32), default="unknown", nullable=False, index=True)
+    confidence: float = Column(Float, nullable=True)
+    evidence = Column(RegistryJSON, nullable=True)
+    proposed_at: datetime = Column(DateTime(timezone=True), server_default=func.now())
+    created_at: datetime = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at: datetime = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("household_id", "source_snapshot_id", "recommendation_type", name="uq_registry_recommendation_snapshot"),
+    )
+
+    household = relationship("RegistryHousehold", back_populates="recommendations")
+
+
+class RegistryConsentEvent(Base):
+    """Audit event for consent/DNC evidence observed in source data."""
+
+    __tablename__ = "registry_consent_events"
+
+    id: int = Column(Integer, primary_key=True, autoincrement=True)
+    household_id: int = Column(Integer, ForeignKey("registry_households.id"), nullable=False, index=True)
+    person_id: int = Column(Integer, ForeignKey("registry_people.id"), nullable=True, index=True)
+    contact_method_id: int = Column(Integer, ForeignKey("registry_contact_methods.id"), nullable=True)
+    external_record_id: int = Column(Integer, ForeignKey("registry_external_records.id"), nullable=True)
+    event_type: str = Column(String(128), nullable=False, index=True)
+    source: str = Column(String(32), nullable=False, index=True)
+    evidence: str = Column(Text, nullable=True)
+    occurred_at: datetime = Column(DateTime(timezone=True), nullable=True)
+    observed_at: datetime = Column(DateTime(timezone=True), server_default=func.now())
+    created_at: datetime = Column(DateTime(timezone=True), server_default=func.now())
+
+    household = relationship("RegistryHousehold", back_populates="consent_events")

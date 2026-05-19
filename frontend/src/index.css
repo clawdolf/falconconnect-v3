@@ -706,6 +706,58 @@ body {
   border-color: var(--accent-dim);
 }
 
+.btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  padding: 0.5rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  background: var(--surface);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+  transition: color 0.1s, border-color 0.1s, background 0.1s;
+}
+
+.btn-secondary:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--text-muted);
+  background: var(--surface-hover);
+}
+
+.btn-secondary:disabled,
+.btn-primary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.input {
+  width: 100%;
+  min-height: 34px;
+  padding: 0.45rem 0.6rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+}
+
+.input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.input:disabled {
+  color: var(--text-muted);
+  opacity: 0.75;
+}
+
 /* ── Badges ── */
 .badge {
   display: inline-block;

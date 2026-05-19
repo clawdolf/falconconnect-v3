@@ -1,0 +1,171 @@
+"""Admin-only Registry v1 endpoints.
+
+Registry v1 is review-only. This router writes only local registry tables and
+never mutates Close, GHL, or Notion.
+"""
+
+from __future__ import annotations
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from db.database import get_session
+from routers.lead_hygiene import require_admin
+from services.registry import REGISTRY_V1_ENABLED
+from services.registry import service
+from services.registry.schemas import (
+    RegistryConnectionStatus,
+    RegistryConsentEventOut,
+    RegistryContactMethodOut,
+    RegistryExternalRecordOut,
+    RegistryHouseholdDetail,
+    RegistryHouseholdOut,
+    RegistryImportSummary,
+    RegistryPersonDetail,
+    RegistryPersonOut,
+    RegistryRecommendationOut,
+)
+
+router = APIRouter()
+
+
+def _enabled() -> None:
+    if not REGISTRY_V1_ENABLED:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Registry v1 is disabled.")
+
+
+@router.get("/summary")
+async def get_summary(
+    _user=Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+):
+    _enabled()
+    return await service.summary(session)
+
+
+@router.get("/households", response_model=list[RegistryHouseholdOut])
+async def get_households(
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    _user=Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+):
+    _enabled()
+    return await service.list_households(session, limit=limit, offset=offset)
+
+
+@router.get("/households/{household_id}", response_model=RegistryHouseholdDetail)
+async def get_household(
+    household_id: int,
+    _user=Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+):
+    _enabled()
+    household = await service.household_detail(session, household_id)
+    if household is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Household not found.")
+    return household
+
+
+@router.get("/people", response_model=list[RegistryPersonOut])
+async def get_people(
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    _user=Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+):
+    _enabled()
+    return await service.list_people(session, limit=limit, offset=offset)
+
+
+@router.get("/people/{person_id}", response_model=RegistryPersonDetail)
+async def get_person(
+    person_id: int,
+    _user=Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+):
+    _enabled()
+    person = await service.person_detail(session, person_id)
+    if person is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Person not found.")
+    return {
+        **RegistryPersonOut.model_validate(person).model_dump(),
+        "household": person.household,
+        "contact_methods": person.contact_methods,
+        "external_records": await service.external_records_for_person(session, person_id),
+        "recommendations": await service.recommendations_for_person(session, person_id),
+        "consent_events": await service.consent_events_for_person(session, person_id),
+    }
+
+
+@router.get("/search")
+async def search(
+    q: str = Query(..., min_length=1, max_length=256),
+    limit: int = Query(25, ge=1, le=100),
+    _user=Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+):
+    _enabled()
+    results = await service.search(session, q=q, limit=limit)
+    return {
+        "households": [RegistryHouseholdOut.model_validate(item) for item in results["households"]],
+        "people": [RegistryPersonOut.model_validate(item) for item in results["people"]],
+        "contact_methods": [RegistryContactMethodOut.model_validate(item) for item in results["contact_methods"]],
+        "external_records": [RegistryExternalRecordOut.model_validate(item) for item in results["external_records"]],
+    }
+
+
+@router.get("/recommendations", response_model=list[RegistryRecommendationOut])
+async def get_recommendations(
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    _user=Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+):
+    _enabled()
+    return await service.recommendations(session, limit=limit, offset=offset)
+
+
+@router.get("/consent-events", response_model=list[RegistryConsentEventOut])
+async def get_consent_events(
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    _user=Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+):
+    _enabled()
+    return await service.consent_events(session, limit=limit, offset=offset)
+
+
+@router.get("/connections", response_model=list[RegistryConnectionStatus])
+async def get_connections(_user=Depends(require_admin)):
+    _enabled()
+    return service.connection_statuses()
+
+
+@router.post("/imports/lead-hygiene/{job_id}", response_model=RegistryImportSummary)
+async def import_lead_hygiene(
+    job_id: str,
+    _user=Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+):
+    _enabled()
+    try:
+        counters = await service.import_lead_hygiene_report(session, job_id=job_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    return service.import_summary_dict(counters)
+
+
+@router.post("/imports/source/{source}")
+async def import_source_shell(source: str, _user=Depends(require_admin)):
+    _enabled()
+    if source not in {"close", "ghl", "notion"}:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unknown source.")
+    raise HTTPException(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        detail=f"{source} live import is review-only shell in Registry v1. No external writes are available.",
+    )
+
