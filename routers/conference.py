@@ -173,6 +173,20 @@ async def start_bridge_session(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/conference/bridge/live")
+async def find_live_bridge(
+    session: AsyncSession = Depends(get_session),
+    user=Depends(require_auth),
+):
+    """Find the newest active bridge, including signed Twilio auto-detected transfers."""
+    result = await conf_service.find_live_bridge(
+        session, user_id=user.get("user_id") or user.get("sub")
+    )
+    if not result:
+        raise HTTPException(status_code=404, detail="No live bridge found")
+    return result
+
+
 # ── Parameterized routes ──
 
 

@@ -25,6 +25,15 @@ HOLD_MUSIC_URL = "http://twimlets.com/holdmusic?Bucket=com.twilio.music.classica
 
 # Kept for existing caller ID endpoints. Runtime values come from environment.
 CLOSE_NUMBERS: list[str] = []
+AUTO_DETECTED_USER = "twilio-live-detected"
+ACTIVE_BRIDGE_STATUSES = {
+    "transfer_received",
+    "close_connected",
+    "upgrade_pending",
+    "conference_live",
+    "dialing_carrier",
+    "carrier_connected",
+}
 
 def normalize_e164(phone: str) -> str:
     """Convert common US phone formats to E.164."""
@@ -118,7 +127,18 @@ async def handle_bridge_inbound(
     lead_phone = _safe_normalize(from_phone)
     conf = await _find_pending_transfer(session, lead_phone)
     if not conf:
-        raise ValueError("No pending bridge session matches this transferred call")
+        conf = ConferenceSession(
+            user_id=AUTO_DETECTED_USER,
+            lead_phone=lead_phone or from_phone or "",
+            carrier_phone="",
+            seb_phone=_seb_close_number(),
+            lead_id="",
+            status="transfer_received",
+            started_at=datetime.now(timezone.utc),
+        )
+        session.add(conf)
+        await session.flush()
+        conf.conference_sid = _generate_conference_name(str(conf.id))
 
     if lead_phone:
         conf.lead_phone = lead_phone
@@ -388,6 +408,25 @@ async def get_conference_status(session: AsyncSession, conf_id: str) -> Dict[str
             "carrier": _participant_state(conf, twilio_participants, "carrier", conf.carrier_participant_sid, conf.carrier_phone),
         },
     }
+
+
+async def find_live_bridge(session: AsyncSession, user_id: str) -> Optional[Dict[str, Any]]:
+    """Find the newest live bridge and claim signed Twilio auto-detected sessions for the caller."""
+    stmt = (
+        select(ConferenceSession)
+        .where(ConferenceSession.status.in_(ACTIVE_BRIDGE_STATUSES))
+        .where(or_(ConferenceSession.user_id == user_id, ConferenceSession.user_id == AUTO_DETECTED_USER))
+        .order_by(desc(ConferenceSession.started_at))
+        .limit(1)
+    )
+    result = await session.execute(stmt)
+    conf = result.scalar_one_or_none()
+    if not conf:
+        return None
+    if conf.user_id == AUTO_DETECTED_USER:
+        conf.user_id = user_id
+        await session.commit()
+    return await get_conference_status(session, str(conf.id))
 
 
 async def list_sessions(session: AsyncSession, limit: int = 10, user_id: Optional[str] = None) -> list:

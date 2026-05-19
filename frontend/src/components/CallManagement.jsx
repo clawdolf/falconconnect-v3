@@ -75,6 +75,27 @@ function CallManagement() {
     }
   }
 
+  async function findLiveBridge() {
+    setBusy('find-live')
+    setError('')
+    try {
+      const res = await fetch(`${API}/conference/bridge/live`, { headers: authHeaders() })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(body.detail || `No live bridge found (${res.status})`)
+      }
+      const data = await res.json()
+      setSession(data)
+      setStatus(data)
+      addLog(`Live bridge found for ${data.lead_phone}.`)
+      await loadSessions()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusy('')
+    }
+  }
+
   async function createSession(event) {
     event.preventDefault()
     setBusy('create')
@@ -189,17 +210,25 @@ function CallManagement() {
         </div>
 
         {!confId ? (
-          <form onSubmit={createSession} style={styles.formGrid}>
-            <Field label="Lead phone number">
-              <input style={styles.input} type="tel" value={leadPhone} onChange={(e) => setLeadPhone(e.target.value)} placeholder="+14804897756" required />
-            </Field>
-            <Field label="Close lead id optional">
-              <input style={styles.input} type="text" value={leadId} onChange={(e) => setLeadId(e.target.value)} placeholder="lead_..." />
-            </Field>
-            <button style={styles.primaryButton} disabled={busy === 'create' || !leadPhone}>
-              {busy === 'create' ? 'Creating...' : 'Create Transfer Session'}
-            </button>
-          </form>
+          <div>
+            <form onSubmit={createSession} style={styles.formGrid}>
+              <Field label="Lead phone number">
+                <input style={styles.input} type="tel" value={leadPhone} onChange={(e) => setLeadPhone(e.target.value)} placeholder="Lead phone" required />
+              </Field>
+              <Field label="Close lead id optional">
+                <input style={styles.input} type="text" value={leadId} onChange={(e) => setLeadId(e.target.value)} placeholder="lead_..." />
+              </Field>
+              <button style={styles.primaryButton} disabled={busy === 'create' || !leadPhone}>
+                {busy === 'create' ? 'Creating...' : 'Create Transfer Session'}
+              </button>
+            </form>
+            <div style={styles.liveFindRow}>
+              <span style={styles.monoMuted}>Already transferred from Close? Attach the cockpit to the live bridge.</span>
+              <button type="button" style={styles.secondaryButton} disabled={busy === 'find-live'} onClick={findLiveBridge}>
+                {busy === 'find-live' ? 'Finding...' : 'Find Live Bridge'}
+              </button>
+            </div>
+          </div>
         ) : (
           <div style={styles.workflowGrid}>
             <div style={styles.transferBox}>
@@ -375,6 +404,7 @@ const styles = {
   sectionHead: { display: 'flex', justifyContent: 'space-between', gap: '1rem', alignItems: 'center', marginBottom: '0.8rem' },
   sectionTitle: { fontFamily: 'var(--font-display)', fontSize: '0.95rem', margin: 0, letterSpacing: 0 },
   formGrid: { display: 'grid', gridTemplateColumns: 'minmax(220px, 1fr) minmax(220px, 1fr) auto', gap: '0.75rem', alignItems: 'end' },
+  liveFindRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem', marginTop: '0.75rem', paddingTop: '0.75rem', borderTop: '1px solid var(--border-subtle)', flexWrap: 'wrap' },
   workflowGrid: { display: 'grid', gridTemplateColumns: 'minmax(260px, 1fr) auto auto', gap: '0.75rem', alignItems: 'stretch' },
   carrierGrid: { display: 'grid', gridTemplateColumns: 'minmax(220px, 280px) minmax(220px, 1fr) auto', gap: '0.75rem', alignItems: 'end' },
   field: { display: 'flex', flexDirection: 'column', gap: '0.25rem' },
