@@ -64,7 +64,11 @@ def request(method, path, cfg, payload=None):
         raise RuntimeError(f"Missing FC_MENU_BAR_TOKEN in {CONFIG_PATH}")
     url = cfg["base_url"].rstrip("/") + path
     body = None
-    headers = {"Authorization": f"Bearer {cfg['token']}"}
+    headers = {
+        "Authorization": f"Bearer {cfg['token']}",
+        "Accept": "application/json",
+        "User-Agent": "FalconConnect-SwiftBar/1.0",
+    }
     if payload is not None:
         body = json.dumps(payload).encode("utf-8")
         headers["Content-Type"] = "application/json"

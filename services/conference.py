@@ -493,16 +493,17 @@ async def find_live_bridge(session: AsyncSession, user_id: str) -> Optional[Dict
         .where(ConferenceSession.status.in_(ACTIVE_BRIDGE_STATUSES))
         .where(or_(ConferenceSession.user_id == user_id, ConferenceSession.user_id == AUTO_DETECTED_USER))
         .order_by(desc(ConferenceSession.started_at))
-        .limit(1)
+        .limit(5)
     )
     result = await session.execute(stmt)
-    conf = result.scalar_one_or_none()
-    if not conf:
-        return None
-    if conf.user_id == AUTO_DETECTED_USER:
-        conf.user_id = user_id
-        await session.commit()
-    return await get_conference_status(session, str(conf.id))
+    for conf in result.scalars().all():
+        if conf.user_id == AUTO_DETECTED_USER:
+            conf.user_id = user_id
+            await session.commit()
+        status = await get_conference_status(session, str(conf.id))
+        if status.get("status") in ACTIVE_BRIDGE_STATUSES:
+            return status
+    return None
 
 
 async def list_sessions(session: AsyncSession, limit: int = 10, user_id: Optional[str] = None) -> list:

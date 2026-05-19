@@ -61,7 +61,14 @@ def read_error():
 
 def api_get(path, cfg):
     url = cfg["base_url"].rstrip("/") + path
-    req = urllib.request.Request(url, headers={"Authorization": f"Bearer {cfg['token']}"})
+    req = urllib.request.Request(
+        url,
+        headers={
+            "Authorization": f"Bearer {cfg['token']}",
+            "Accept": "application/json",
+            "User-Agent": "FalconConnect-SwiftBar/1.0",
+        },
+    )
     try:
         with urllib.request.urlopen(req, timeout=8) as resp:
             return resp.status, json.loads(resp.read().decode("utf-8") or "{}")
@@ -156,6 +163,14 @@ def main():
         print("---")
         print(f"API status: {status}")
         print(swift((live or {}).get("error", "Bridge API error")))
+        print_common(cfg, cache)
+        return
+
+    if live.get("status") == "ended":
+        print("FC Bridge: idle")
+        print("---")
+        print("No live bridge found")
+        print(action_line("Find Live Bridge", "find-live"))
         print_common(cfg, cache)
         return
 
