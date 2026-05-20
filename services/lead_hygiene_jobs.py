@@ -23,6 +23,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from sqlalchemy import delete, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from db.database import _get_session_factory
+from db.models import LeadHygieneReportRun
+
 from services.lead_hygiene_collect import (
     run_audit_from_fixtures,
     run_audit_from_live,
@@ -177,6 +183,104 @@ def _write_meta(record: JobRecord) -> None:
         logger.warning("Failed to write meta.json for job %s: %s", record.job_id, exc)
 
 
+
+def _parse_dt(value: Optional[str]) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except Exception:
+        return None
+
+
+def _report_json_from_record(record: JobRecord) -> Optional[Dict[str, Any]]:
+    if not record.json_path:
+        return None
+    try:
+        path = Path(record.json_path)
+        if path.is_file():
+            data = json.loads(path.read_text())
+            return data if isinstance(data, dict) else None
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Failed to read JSON report for durable save %s: %s", record.job_id, exc)
+    return None
+
+
+def _report_csv_from_record(record: JobRecord) -> Optional[str]:
+    if not record.csv_path:
+        return None
+    try:
+        path = Path(record.csv_path)
+        if path.is_file():
+            return path.read_text()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Failed to read CSV report for durable save %s: %s", record.job_id, exc)
+    return None
+
+
+def _row_to_public(row: LeadHygieneReportRun) -> Dict[str, Any]:
+    record = JobRecord(
+        job_id=row.job_id,
+        status=row.status,
+        params=row.params or {},
+        started_at=row.started_at.isoformat() if row.started_at else "",
+        finished_at=row.finished_at.isoformat() if row.finished_at else None,
+        phase=row.phase or "",
+        summary=row.summary,
+        error=row.error,
+        sources=row.sources or {},
+    )
+    public = record.to_public()
+    public["reports"] = {
+        "csv": bool(row.csv_text) or public["reports"].get("csv", False),
+        "json": bool(row.report_payload) or public["reports"].get("json", False),
+    }
+    public["durable"] = True
+    return public
+
+
+async def persist_record_to_db(record: JobRecord, session: Optional[AsyncSession] = None) -> None:
+    """Save completed/failed report metadata and artifacts to durable DB storage."""
+    owns_session = session is None
+    if session is None:
+        try:
+            session = _get_session_factory()()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Lead Hygiene durable report save unavailable for %s: %s", record.job_id, exc)
+            return
+    try:
+        report_payload = _report_json_from_record(record)
+        csv_text = _report_csv_from_record(record)
+        existing = await session.scalar(
+            select(LeadHygieneReportRun).where(LeadHygieneReportRun.job_id == record.job_id)
+        )
+        if existing is None:
+            existing = LeadHygieneReportRun(job_id=record.job_id)
+            session.add(existing)
+        existing.status = record.status
+        existing.phase = record.phase
+        existing.params = record.params
+        existing.summary = record.summary
+        existing.sources = record.sources
+        existing.started_at = _parse_dt(record.started_at)
+        existing.finished_at = _parse_dt(record.finished_at)
+        existing.error = record.error
+        if report_payload is not None:
+            existing.report_payload = report_payload
+        if csv_text is not None:
+            existing.csv_text = csv_text
+        existing.deleted_at = None
+        if owns_session:
+            await session.commit()
+    except Exception as exc:  # noqa: BLE001
+        if owns_session:
+            await session.rollback()
+        logger.warning("Failed durable Lead Hygiene report save for %s: %s", record.job_id, exc)
+    finally:
+        if owns_session and session is not None:
+            await session.close()
+
+
 def _params_with_defaults(params: JobParams) -> Dict[str, Any]:
     return {
         "limit": params.limit,
@@ -251,6 +355,7 @@ async def _run_job(record: JobRecord, params: JobParams) -> None:
     finally:
         record.finished_at = datetime.now(timezone.utc).isoformat()
         _write_meta(record)
+        await persist_record_to_db(record)
 
 
 async def start_job(params: JobParams, max_active: Optional[int] = None) -> JobRecord:
@@ -288,6 +393,149 @@ def _load_meta_from_disk(run_dir: Path) -> Optional[JobRecord]:
     except Exception as exc:  # noqa: BLE001
         logger.warning("Failed to read meta.json at %s: %s", meta_path, exc)
         return None
+
+
+async def list_runs_async(session: AsyncSession, limit: int = 50) -> List[Dict[str, Any]]:
+    """Return recent runs from durable DB, active memory, and legacy local files."""
+    by_id: Dict[str, Dict[str, Any]] = {}
+    result = await session.execute(
+        select(LeadHygieneReportRun)
+        .where(LeadHygieneReportRun.deleted_at.is_(None))
+        .order_by(LeadHygieneReportRun.started_at.desc().nullslast(), LeadHygieneReportRun.id.desc())
+        .limit(limit)
+    )
+    for row in result.scalars().all():
+        by_id[row.job_id] = _row_to_public(row)
+
+    for item in list_runs(limit=limit):
+        by_id[item["job_id"]] = {**item, **by_id.get(item["job_id"], {})}
+        if item["job_id"] in _REGISTRY:
+            by_id[item["job_id"]] = item
+
+    rows = sorted(by_id.values(), key=lambda r: r.get("started_at") or "", reverse=True)
+    return rows[:limit]
+
+
+async def get_run_public_async(session: AsyncSession, job_id: str) -> Optional[Dict[str, Any]]:
+    if not _JOB_ID_RE.match(job_id or ""):
+        return None
+    rec = get_run(job_id)
+    if rec is not None:
+        return rec.to_public()
+    row = await session.scalar(
+        select(LeadHygieneReportRun).where(
+            LeadHygieneReportRun.job_id == job_id,
+            LeadHygieneReportRun.deleted_at.is_(None),
+        )
+    )
+    return _row_to_public(row) if row else None
+
+
+async def load_report_payload_async(session: AsyncSession, job_id: str) -> Dict[str, Any]:
+    try:
+        path = resolve_report_path(job_id, "json")
+        data = json.loads(path.read_text())
+        if isinstance(data, dict):
+            return data
+    except FileNotFoundError:
+        pass
+    if not _JOB_ID_RE.match(job_id or ""):
+        raise ValueError("Invalid job id.")
+    row = await session.scalar(
+        select(LeadHygieneReportRun).where(
+            LeadHygieneReportRun.job_id == job_id,
+            LeadHygieneReportRun.deleted_at.is_(None),
+        )
+    )
+    if row is None or not row.report_payload:
+        raise FileNotFoundError("Report payload not found.")
+    return row.report_payload
+
+
+async def load_csv_text_async(session: AsyncSession, job_id: str) -> str:
+    try:
+        path = resolve_report_path(job_id, "csv")
+        return path.read_text()
+    except FileNotFoundError:
+        pass
+    if not _JOB_ID_RE.match(job_id or ""):
+        raise ValueError("Invalid job id.")
+    row = await session.scalar(
+        select(LeadHygieneReportRun).where(
+            LeadHygieneReportRun.job_id == job_id,
+            LeadHygieneReportRun.deleted_at.is_(None),
+        )
+    )
+    if row is None or row.csv_text is None:
+        raise FileNotFoundError("CSV report not found.")
+    return row.csv_text
+
+
+async def load_report_preview_async(
+    session: AsyncSession,
+    job_id: str,
+    limit: int = 25,
+    category: str | None = None,
+) -> Dict[str, Any]:
+    data = await load_report_payload_async(session, job_id)
+    rows = data.get("rows") or []
+    bucket_filter = _bucket_filter(category)
+    if bucket_filter is not None:
+        rows = [r for r in rows if r.get("recommended_bucket") in bucket_filter]
+    total = len(rows)
+    preview = [_preview_row(r) for r in rows[:limit]]
+    return {
+        "total_rows": total,
+        "preview_limit": limit,
+        "category": category or "all",
+        "summary": data.get("summary"),
+        "rows": preview,
+    }
+
+
+async def delete_run_async(session: AsyncSession, job_id: str) -> Dict[str, Any]:
+    """Soft-delete durable history and remove any local cache files."""
+    if not _JOB_ID_RE.match(job_id or ""):
+        raise ValueError("Invalid job id.")
+    rec = get_run(job_id)
+    row = await session.scalar(select(LeadHygieneReportRun).where(LeadHygieneReportRun.job_id == job_id))
+    status_value = rec.status if rec is not None else (row.status if row is not None else None)
+    if status_value is None:
+        raise FileNotFoundError("Run not found.")
+    if status_value in {"queued", "running"}:
+        raise RuntimeError("Cannot delete a queued or running Lead Hygiene job.")
+    removed_files = 0
+    if rec is not None and rec.run_dir:
+        try:
+            base = REPORTS_BASE.resolve()
+            run_dir = Path(rec.run_dir).resolve()
+            if _RUN_DIR_RE.match(run_dir.name) and (base == run_dir or base in run_dir.parents) and run_dir.exists():
+                removed_files = sum(1 for child in run_dir.rglob("*") if child.is_file())
+                shutil.rmtree(run_dir)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Failed local cache delete for %s: %s", job_id, exc)
+    if row is not None:
+        row.deleted_at = datetime.now(timezone.utc)
+    _REGISTRY.pop(job_id, None)
+    task = _TASKS.pop(job_id, None)
+    if task and not task.done():
+        _TASKS[job_id] = task
+    return {"deleted": True, "job_id": job_id, "removed_files": removed_files, "soft_deleted": row is not None}
+
+
+async def purge_all_runs_async(session: AsyncSession) -> Dict[str, Any]:
+    if active_run_count() > 0:
+        raise RuntimeError("Cannot purge report history while a Lead Hygiene job is queued or running.")
+    result = await session.execute(delete(LeadHygieneReportRun))
+    removed_files = 0
+    REPORTS_BASE.mkdir(parents=True, exist_ok=True)
+    for child in REPORTS_BASE.iterdir():
+        if child.is_dir() and _RUN_DIR_RE.match(child.name):
+            removed_files += sum(1 for item in child.rglob("*") if item.is_file())
+            shutil.rmtree(child)
+    _REGISTRY.clear()
+    _TASKS.clear()
+    return {"purged": True, "deleted_rows": result.rowcount or 0, "removed_files": removed_files}
 
 
 def list_runs(limit: int = 50) -> List[Dict[str, Any]]:

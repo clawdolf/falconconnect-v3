@@ -194,9 +194,10 @@ async def get_connections(_user=Depends(require_admin)):
 async def get_lead_hygiene_reports(
     limit: int = Query(50, ge=1, le=100),
     _user=Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
 ):
     _enabled()
-    return service.list_lead_hygiene_reports(limit=limit)
+    return await service.list_lead_hygiene_reports(session, limit=limit)
 
 
 @router.post("/imports/lead-hygiene/{job_id}", response_model=RegistryImportSummary)

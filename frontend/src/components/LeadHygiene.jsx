@@ -136,6 +136,7 @@ function LeadHygiene({ onReportsChanged }) {
   const [runsLoading, setRunsLoading] = useState(false)
   const [error, setError] = useState(null)
   const [deletingJobId, setDeletingJobId] = useState(null)
+  const [purgingHistory, setPurgingHistory] = useState(false)
 
   const [statusLabel, setStatusLabel] = useState('Voicemail')
   const [statusFreeText, setStatusFreeText] = useState('')
@@ -331,7 +332,7 @@ function LeadHygiene({ onReportsChanged }) {
       setError('Queued or running Lead Hygiene jobs cannot be deleted.')
       return
     }
-    const ok = window.confirm(`Local-only delete Lead Hygiene report ${shortId(job.job_id)}? Registry imports and external systems will not be changed.`)
+    const ok = window.confirm(`Remove Lead Hygiene report ${shortId(job.job_id)} from history? This soft-deletes it from the UI. Registry imports and external systems will not be changed.`)
     if (!ok) return
     setDeletingJobId(job.job_id)
     setError(null)
@@ -352,6 +353,27 @@ function LeadHygiene({ onReportsChanged }) {
       setError(e.message)
     } finally {
       setDeletingJobId(null)
+    }
+  }
+
+
+  const purgeHistory = async () => {
+    const phrase = 'DELETE HISTORICAL REPORTS PERMANENTLY'
+    const typed = window.prompt(`This permanently deletes the entire database of historical Lead Hygiene reports. Registry imports and external systems will not be changed. Type ${phrase} to confirm.`)
+    if (typed !== phrase) return
+    setPurgingHistory(true)
+    setError(null)
+    try {
+      await authFetch(`${API_BASE}/runs?confirm=${encodeURIComponent(phrase)}`, { method: 'DELETE' })
+      setSelectedJobId(null)
+      setSelectedJob(null)
+      setPreview(null)
+      await loadRuns()
+      onReportsChanged?.()
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setPurgingHistory(false)
     }
   }
 
@@ -575,7 +597,20 @@ function LeadHygiene({ onReportsChanged }) {
 
       {/* ── C. Reports list ── */}
       <section className="section">
-        <h2 className="section-title">Hygiene Report History</h2>
+        <div className="section-header-row">
+          <h2 className="section-title" style={{ marginBottom: 0, paddingBottom: 0, borderBottom: 'none' }}>Hygiene Report History</h2>
+          <button
+            className="btn btn-sm"
+            onClick={purgeHistory}
+            disabled={purgingHistory}
+            style={{ color: 'var(--red)', borderColor: 'var(--red)' }}
+          >
+            {purgingHistory ? 'Purging…' : 'Force delete report DB'}
+          </button>
+        </div>
+        <p className="form-hint" style={{ margin: '0.5rem 0 1rem' }}>
+          Report history now persists in Postgres. Local-only delete hides one report; force delete permanently removes every stored historical report payload.
+        </p>
         {runs.length === 0 ? (
           <p className="no-results">No runs yet. Start one above.</p>
         ) : (
@@ -631,7 +666,7 @@ function LeadHygiene({ onReportsChanged }) {
                             onClick={() => deleteRun(r)}
                             style={{ color: canDelete ? 'var(--red)' : undefined, borderColor: canDelete ? 'var(--red)' : undefined }}
                           >
-                            {deletingJobId === r.job_id ? 'Deleting…' : 'Local-only delete'}
+                            {deletingJobId === r.job_id ? 'Deleting…' : 'Soft delete'}
                           </button>
                         </div>
                       </td>

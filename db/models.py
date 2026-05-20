@@ -492,6 +492,28 @@ class GHLComplianceFlag(Base):
     resolved: bool = Column(Boolean, default=False)
 
 
+class LeadHygieneReportRun(Base):
+    """Durable Lead Hygiene report history and payload storage."""
+
+    __tablename__ = "lead_hygiene_report_runs"
+
+    id: int = Column(Integer, primary_key=True, autoincrement=True)
+    job_id: str = Column(String(32), unique=True, nullable=False, index=True)
+    status: str = Column(String(32), nullable=False, index=True)
+    phase: str = Column(String(64), nullable=True)
+    params = Column(RegistryJSON, nullable=True)
+    summary = Column(RegistryJSON, nullable=True)
+    report_payload = Column(RegistryJSON, nullable=True)
+    csv_text: str = Column(Text, nullable=True)
+    sources = Column(RegistryJSON, nullable=True)
+    started_at: datetime = Column(DateTime(timezone=True), nullable=True, index=True)
+    finished_at: datetime = Column(DateTime(timezone=True), nullable=True)
+    error: str = Column(Text, nullable=True)
+    deleted_at: datetime = Column(DateTime(timezone=True), nullable=True, index=True)
+    created_at: datetime = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at: datetime = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 #  Registry v1 — local-only identity review cache
 # ══════════════════════════════════════════════════════════════════════════════

@@ -17,6 +17,7 @@ never traverse out of it.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
@@ -25,8 +26,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile, status
 from fastapi.responses import FileResponse
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from db.database import get_session
 from pydantic import BaseModel, Field, field_validator
 
 from middleware.auth import require_auth
@@ -36,11 +40,13 @@ from services.lead_hygiene_collect import (
 )
 from services.lead_hygiene_jobs import (
     JobParams,
-    REPORTS_BASE,
-    delete_run,
-    get_run,
-    list_runs,
-    load_report_preview,
+    delete_run_async,
+    get_run_public_async,
+    list_runs_async,
+    load_csv_text_async,
+    load_report_payload_async,
+    load_report_preview_async,
+    purge_all_runs_async,
     resolve_report_path,
     start_job,
 )
@@ -352,33 +358,63 @@ async def start_run(payload: StartJobRequest, _user=Depends(require_admin)):
 
 
 @router.get("/runs")
-async def list_run_records(limit: int = 25, _user=Depends(require_admin)):
-    """List the most recent runs (in-memory + on-disk meta)."""
+async def list_run_records(
+    limit: int = 25,
+    _user=Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+):
+    """List recent runs from durable DB history plus active in-memory jobs."""
     if limit < 1 or limit > 200:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="limit must be between 1 and 200.",
         )
-    return {"runs": list_runs(limit=limit)}
+    return {"runs": await list_runs_async(session, limit=limit)}
+
+
+@router.delete("/runs")
+async def purge_run_history(
+    confirm: str,
+    _user=Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+):
+    """Permanently delete all durable Lead Hygiene report history."""
+    if confirm != "DELETE HISTORICAL REPORTS PERMANENTLY":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Confirmation text mismatch.",
+        )
+    try:
+        return await purge_all_runs_async(session)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
 
 
 @router.get("/runs/{job_id}")
-async def get_run_record(job_id: str, _user=Depends(require_admin)):
+async def get_run_record(
+    job_id: str,
+    _user=Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+):
     """Return status + summary for a single job."""
-    rec = get_run(job_id)
+    rec = await get_run_public_async(session, job_id)
     if rec is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Run not found.",
         )
-    return rec.to_public()
+    return rec
 
 
 @router.delete("/runs/{job_id}")
-async def delete_run_record(job_id: str, _user=Depends(require_admin)):
-    """Delete a finished local Lead Hygiene report run."""
+async def delete_run_record(
+    job_id: str,
+    _user=Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+):
+    """Soft-delete a finished Lead Hygiene report from history and remove local cache files."""
     try:
-        return delete_run(job_id)
+        return await delete_run_async(session, job_id)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
     except RuntimeError as exc:
@@ -393,6 +429,7 @@ async def get_run_preview(
     limit: int = 25,
     category: Optional[str] = None,
     _user=Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
 ):
     """Return the first `limit` rows of the JSON report for the UI table."""
     if limit < 1 or limit > 200:
@@ -401,7 +438,7 @@ async def get_run_preview(
             detail="limit must be between 1 and 200.",
         )
     try:
-        return load_report_preview(job_id, limit=limit, category=category)
+        return await load_report_preview_async(session, job_id, limit=limit, category=category)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
     except ValueError as exc:
@@ -413,17 +450,33 @@ async def download_run_report(
     job_id: str,
     kind: str,
     _user=Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
 ):
     """Stream a report file (csv | json) for a completed run."""
+    if kind not in {"csv", "json"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unknown report kind.")
+    media = {"csv": "text/csv", "json": "application/json"}[kind]
+    suffix = ".csv" if kind == "csv" else ".json"
+    filename = f"lead_hygiene_{kind}_{job_id[:12]}{suffix}"
     try:
         path = resolve_report_path(job_id, kind)
+        return FileResponse(path=str(path), media_type=media, filename=filename)
+    except FileNotFoundError:
+        pass
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    try:
+        if kind == "json":
+            payload = await load_report_payload_async(session, job_id)
+            content = json.dumps(payload, indent=2)
+        else:
+            content = await load_csv_text_async(session, job_id)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
-    media = {
-        "csv": "text/csv",
-        "json": "application/json",
-    }[kind]
-    filename = f"lead_hygiene_{kind}_{job_id[:12]}{path.suffix}"
-    return FileResponse(path=str(path), media_type=media, filename=filename)
+    return Response(
+        content=content,
+        media_type=media,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

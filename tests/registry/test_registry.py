@@ -18,6 +18,7 @@ from db.models import (
     RegistryConsentEvent,
     RegistryContactMethod,
     RegistryExternalRecord,
+    LeadHygieneReportRun,
     RegistryHousehold,
     RegistryPerson,
     RegistryRecommendation,
@@ -40,6 +41,7 @@ REGISTRY_TABLES = [
     RegistryExternalRecord.__table__,
     RegistryRecommendation.__table__,
     RegistryConsentEvent.__table__,
+    LeadHygieneReportRun.__table__,
 ]
 
 
@@ -48,6 +50,8 @@ def _run(coro):
 
 
 def _make_app(session_factory, user_id: str | None = "user_3ASrwDOrSTaDxCus6f1B5lnDsgz") -> FastAPI:
+    if session_factory is None:
+        session_factory = _run(_session_factory())
     app = FastAPI()
     app.include_router(router, prefix="/api/admin/registry")
 

@@ -6,7 +6,6 @@ import os
 from dataclasses import asdict, dataclass
 from collections import Counter
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any, Iterable, Optional
 
 from sqlalchemy import func, or_, select
@@ -24,7 +23,6 @@ from db.models import (
 )
 from services.lead_hygiene import normalize_email, normalize_name, normalize_phone
 from services import lead_hygiene_jobs
-from services.lead_hygiene_jobs import resolve_report_path
 
 
 SOURCE_COVERAGE_SOURCES = ("close", "ghl", "notion", "lead_hygiene")
@@ -584,9 +582,9 @@ def connection_statuses() -> list[dict[str, Any]]:
     ]
 
 
-def list_lead_hygiene_reports(limit: int = 50) -> list[dict[str, Any]]:
+async def list_lead_hygiene_reports(session: AsyncSession, limit: int = 50) -> list[dict[str, Any]]:
     reports = []
-    for run in lead_hygiene_jobs.list_runs(limit=limit):
+    for run in await lead_hygiene_jobs.list_runs_async(session, limit=limit):
         reports.append(_lead_hygiene_report_item(run))
     return reports
 
@@ -646,8 +644,7 @@ def _report_label(status: str, rows_seen: Optional[int], created_at: Any, short_
 
 
 async def import_lead_hygiene_report(session: AsyncSession, job_id: str) -> ImportCounters:
-    report_path = resolve_report_path(job_id, "json")
-    payload = json.loads(Path(report_path).read_text())
+    payload = await lead_hygiene_jobs.load_report_payload_async(session, job_id)
     rows = payload.get("rows") or []
     counters = ImportCounters(job_id=job_id, rows_seen=len(rows))
     for idx, row in enumerate(rows):

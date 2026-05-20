@@ -13,6 +13,10 @@ from pathlib import Path
 
 import pytest
 from fastapi import FastAPI
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+from db.database import get_session
+from db.models import Base, LeadHygieneReportRun
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
@@ -135,11 +139,30 @@ def _run_to_completion(params: jobs.JobParams) -> jobs.JobRecord:
 def _make_app(user_id: str = "user_3ASrwDOrSTaDxCus6f1B5lnDsgz") -> FastAPI:
     app = FastAPI()
     app.include_router(router, prefix="/api/admin/lead-hygiene")
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    async def _init_db():
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all, tables=[LeadHygieneReportRun.__table__])
+
+    asyncio.run(_init_db())
 
     async def _auth_override():
         return {"sub": user_id, "user_id": user_id}
 
+    async def _session_override():
+        async with session_factory() as session:
+            try:
+                yield session
+                await session.commit()
+            except Exception:
+                await session.rollback()
+                raise
+
     app.dependency_overrides[require_auth] = _auth_override
+    app.dependency_overrides[get_session] = _session_override
+    app.state.session_factory = session_factory
     return app
 
 
@@ -279,6 +302,81 @@ class TestFixtureBackgroundRun:
         assert not run_dir.exists()
         assert rec.job_id not in jobs._REGISTRY
         assert jobs.get_run(rec.job_id) is None
+
+
+    def test_db_history_survives_local_report_deletion(self):
+        rec = _run_to_completion(jobs.JobParams(fixture_mode=True))
+        app = _make_app()
+
+        async def _save_to_db():
+            async with app.state.session_factory() as session:
+                await jobs.persist_record_to_db(rec, session=session)
+                await session.commit()
+
+        asyncio.run(_save_to_db())
+        run_dir = Path(rec.run_dir)
+        assert run_dir.exists()
+        import shutil
+        shutil.rmtree(run_dir)
+        jobs._reset_registry_for_tests()
+        client = TestClient(app)
+
+        runs = client.get("/api/admin/lead-hygiene/runs?limit=100")
+        assert runs.status_code == 200, runs.text
+        assert [r["job_id"] for r in runs.json()["runs"]] == [rec.job_id]
+        assert runs.json()["runs"][0]["reports"]["json"] is True
+
+        preview = client.get(f"/api/admin/lead-hygiene/runs/{rec.job_id}/preview?limit=5")
+        assert preview.status_code == 200, preview.text
+        assert preview.json()["total_rows"] == 11
+
+        csv = client.get(f"/api/admin/lead-hygiene/runs/{rec.job_id}/report/csv")
+        assert csv.status_code == 200, csv.text
+        assert "lead_name" in csv.text
+
+    def test_soft_delete_hides_db_report_without_purging_table(self):
+        rec = _run_to_completion(jobs.JobParams(fixture_mode=True))
+        app = _make_app()
+
+        async def _save_to_db():
+            async with app.state.session_factory() as session:
+                await jobs.persist_record_to_db(rec, session=session)
+                await session.commit()
+
+        asyncio.run(_save_to_db())
+        client = TestClient(app)
+
+        res = client.delete(f"/api/admin/lead-hygiene/runs/{rec.job_id}")
+        assert res.status_code == 200, res.text
+        assert res.json()["soft_deleted"] is True
+
+        after = client.get("/api/admin/lead-hygiene/runs?limit=100")
+        assert after.status_code == 200, after.text
+        assert after.json()["runs"] == []
+
+    def test_purge_history_requires_confirmation_and_deletes_rows(self):
+        rec = _run_to_completion(jobs.JobParams(fixture_mode=True))
+        app = _make_app()
+
+        async def _save_to_db():
+            async with app.state.session_factory() as session:
+                await jobs.persist_record_to_db(rec, session=session)
+                await session.commit()
+
+        asyncio.run(_save_to_db())
+        client = TestClient(app)
+
+        bad = client.delete("/api/admin/lead-hygiene/runs?confirm=nope")
+        assert bad.status_code == 400, bad.text
+
+        good = client.delete("/api/admin/lead-hygiene/runs?confirm=DELETE%20HISTORICAL%20REPORTS%20PERMANENTLY")
+        assert good.status_code == 200, good.text
+        assert good.json()["purged"] is True
+        assert good.json()["deleted_rows"] == 1
+
+        after = client.get("/api/admin/lead-hygiene/runs?limit=100")
+        assert after.status_code == 200, after.text
+        assert after.json()["runs"] == []
 
     def test_delete_rejects_running_job_with_409(self):
         job_id = "c" * 32
