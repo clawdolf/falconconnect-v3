@@ -6,16 +6,24 @@ never mutates Close, GHL, or Notion.
 
 from __future__ import annotations
 
+import csv
+import io
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.database import get_session
 from routers.lead_hygiene import require_admin
 from services.registry import REGISTRY_V1_ENABLED
+from services.registry import reengagement
 from services.registry import service
 from services.registry.schemas import (
+    ReengagementCampaignPreview,
+    ReengagementCampaignPreviewRequest,
+    ReengagementPoolRow,
+    ReengagementPoolSummary,
     RegistryConnectionStatus,
     RegistryConsentEventOut,
     RegistryHouseholdDetail,
@@ -188,6 +196,94 @@ async def get_consent_events(
 async def get_connections(_user=Depends(require_admin)):
     _enabled()
     return service.connection_statuses()
+
+
+@router.get("/reengagement/summary", response_model=ReengagementPoolSummary)
+async def get_reengagement_summary(
+    recent_window_days: int = Query(30, ge=1, le=365),
+    _user=Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+):
+    _enabled()
+    return await reengagement.summary(session, recent_window_days=recent_window_days)
+
+
+@router.get("/reengagement/pool", response_model=list[ReengagementPoolRow])
+async def get_reengagement_pool(
+    view: str = Query("eligible", pattern="^(eligible|needs_review|do_not_touch|excluded)$"),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    source: str | None = Query(None, max_length=128),
+    risk: str | None = Query(None, max_length=128),
+    bucket: str | None = Query(None, max_length=256),
+    source_ref: str | None = Query(None, max_length=256),
+    recent_window_days: int = Query(30, ge=1, le=365),
+    sort: str = Query("rank", pattern="^(rank|latest|name)$"),
+    _user=Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+):
+    _enabled()
+    return await reengagement.pool(
+        session,
+        view=view,
+        limit=limit,
+        offset=offset,
+        source=source,
+        risk=risk,
+        bucket=bucket,
+        source_ref=source_ref,
+        recent_window_days=recent_window_days,
+        sort=sort,
+    )
+
+
+@router.post("/reengagement/campaign-preview", response_model=ReengagementCampaignPreview)
+async def preview_reengagement_campaign(
+    payload: ReengagementCampaignPreviewRequest,
+    _user=Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+):
+    _enabled()
+    try:
+        return await reengagement.campaign_preview(session, **payload.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+
+@router.post("/reengagement/export")
+async def export_reengagement_campaign(
+    payload: ReengagementCampaignPreviewRequest,
+    _user=Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+):
+    _enabled()
+    try:
+        rows, preview = await reengagement.export_rows(session, **payload.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+    out = io.StringIO()
+    fieldnames = [
+        "first_name",
+        "last_name",
+        "phone",
+        "email",
+        "close_lead_id",
+        "ghl_contact_id",
+        "source",
+        "proposed_tag",
+        "channel_mode",
+        "batch_source_reference",
+    ]
+    writer = csv.DictWriter(out, fieldnames=fieldnames)
+    writer.writeheader()
+    writer.writerows(rows)
+    filename = f"lead_reengagement_{preview['proposed_tag']}_{preview['selected_count']}.csv"
+    return Response(
+        content=out.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get("/lead-hygiene-reports", response_model=list[RegistryLeadHygieneReportOut])

@@ -11,6 +11,7 @@ import Research from './components/Research'
 import SmsTemplates from './components/SmsTemplates'
 import CallManagement from './components/CallManagement'
 import Registry from './pages/Registry'
+import LeadReEngagement from './pages/LeadReEngagement'
 import Settings from './pages/Settings'
 
 const PUBLISHABLE_KEY = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY
@@ -23,7 +24,7 @@ const NAV_ITEMS = [
   { key: 'licenses', label: 'Licenses' },
   { key: 'team', label: 'Team' },
   { key: 'analytics', label: 'Analytics' },
-  { key: 'registry', label: 'Registry' },
+  { key: 'lead-reengagement', label: 'Lead Re-Engagement' },
   { key: 'campaigns', label: 'Campaigns' },
   { key: 'research', label: 'Research' },
   { key: 'sms-templates', label: 'SMS Templates' },
@@ -40,6 +41,8 @@ function PageContent({ currentPage, onNavigate }) {
       return <Team />
     case 'analytics':
       return <Analytics />
+    case 'lead-reengagement':
+      return <LeadReEngagement />
     case 'registry':
       return <Registry />
     case 'campaigns':
