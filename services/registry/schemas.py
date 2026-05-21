@@ -194,3 +194,74 @@ class RegistrySankeyOut(BaseModel):
     source_coverage: list[RegistrySourceCoverage] = []
     coverage_universe: int = 0
     truncated: bool = False
+
+
+class ReengagementCopyPreview(BaseModel):
+    sms_opener: str
+    follow_up_sms: str
+    rvm_script: str
+
+
+class ReengagementPoolSummary(BaseModel):
+    eligible: int
+    needs_review: int
+    do_not_touch: int
+    excluded_recent_or_automated: int = 0
+    staged_batches: int = 0
+    released_batches: int = 0
+    persistence_enabled: bool = False
+    proposed_tag: str = "reengage-staging"
+    latest_source_ref: Optional[str] = None
+    latest_import_at: Optional[datetime] = None
+
+
+class ReengagementPoolRow(BaseModel):
+    household_id: int
+    recommendation_id: Optional[int] = None
+    source_snapshot_id: Optional[int] = None
+    display_name: str
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    masked_phone: Optional[str] = None
+    masked_email: Optional[str] = None
+    risk_level: str = "unknown"
+    confidence: Optional[float] = None
+    bucket: str
+    pool: str
+    sources: list[str] = []
+    close_lead_id: Optional[str] = None
+    ghl_contact_id: Optional[str] = None
+    source_ref: Optional[str] = None
+    latest_seen_at: Optional[datetime] = None
+    last_outbound_touch: Optional[str] = None
+    last_inbound_touch: Optional[str] = None
+    risk_flags: list[str] = []
+    reason: Optional[str] = None
+    excluded_reasons: list[str] = []
+    locked_reason: Optional[str] = None
+    proposed_tag: str = "reengage-staging"
+
+
+class ReengagementCampaignPreviewRequest(BaseModel):
+    view: str = "eligible"
+    source: Optional[str] = None
+    risk: Optional[str] = None
+    bucket: Optional[str] = None
+    source_ref: Optional[str] = None
+    recent_window_days: int = 30
+    batch_size: int = 50
+    channel_mode: str = "sms_rvm"
+    sort: str = "rank"
+
+
+class ReengagementCampaignPreview(BaseModel):
+    rows: list[ReengagementPoolRow]
+    total_eligible: int
+    selected_count: int
+    excluded_counts: dict[str, int] = {}
+    channel_mode: str
+    batch_size: int
+    proposed_tag: str = "reengage-staging"
+    source_ref: Optional[str] = None
+    copy_preview: ReengagementCopyPreview
+    confirmation_copy: str
