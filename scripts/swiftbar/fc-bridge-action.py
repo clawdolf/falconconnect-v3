@@ -3,6 +3,7 @@
 
 import json
 import os
+import ssl
 import sys
 import urllib.error
 import urllib.parse
@@ -14,6 +15,18 @@ CACHE_DIR = Path.home() / ".cache" / "falconconnect"
 CACHE_PATH = CACHE_DIR / "bridge.json"
 ERROR_PATH = CACHE_DIR / "bridge-error.txt"
 DEFAULT_BASE_URL = "https://falconnect.org"
+SYSTEM_CA_FILES = (
+    "/private/etc/ssl/cert.pem",
+    "/etc/ssl/cert.pem",
+    "/etc/ssl/certs/ca-certificates.crt",
+)
+
+
+def ssl_context():
+    for cafile in SYSTEM_CA_FILES:
+        if Path(cafile).exists():
+            return ssl.create_default_context(cafile=cafile)
+    return ssl.create_default_context()
 
 
 def load_config():
@@ -74,7 +87,7 @@ def request(method, path, cfg, payload=None):
         headers["Content-Type"] = "application/json"
     req = urllib.request.Request(url, data=body, headers=headers, method=method)
     try:
-        with urllib.request.urlopen(req, timeout=12) as resp:
+        with urllib.request.urlopen(req, timeout=12, context=ssl_context()) as resp:
             raw = resp.read().decode("utf-8")
             return json.loads(raw or "{}")
     except urllib.error.HTTPError as exc:

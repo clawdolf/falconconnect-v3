@@ -3,6 +3,7 @@
 
 import json
 import os
+import ssl
 import sys
 import time
 import urllib.error
@@ -15,6 +16,19 @@ CACHE_PATH = CACHE_DIR / "bridge.json"
 ERROR_PATH = CACHE_DIR / "bridge-error.txt"
 ACTION_HELPER_PATH = Path.home() / ".local" / "share" / "falconconnect" / "fc-bridge-action.py"
 DEFAULT_BASE_URL = "https://falconnect.org"
+SYSTEM_CA_FILES = (
+    "/private/etc/ssl/cert.pem",
+    "/etc/ssl/cert.pem",
+    "/etc/ssl/certs/ca-certificates.crt",
+)
+PHONE_ICON = "☎︎"
+
+
+def ssl_context():
+    for cafile in SYSTEM_CA_FILES:
+        if Path(cafile).exists():
+            return ssl.create_default_context(cafile=cafile)
+    return ssl.create_default_context()
 
 
 def load_config():
@@ -71,7 +85,7 @@ def api_get(path, cfg):
         },
     )
     try:
-        with urllib.request.urlopen(req, timeout=8) as resp:
+        with urllib.request.urlopen(req, timeout=8, context=ssl_context()) as resp:
             return resp.status, json.loads(resp.read().decode("utf-8") or "{}")
     except urllib.error.HTTPError as exc:
         if exc.code == 404:
@@ -96,14 +110,14 @@ def action_line(label, action, *params):
 
 def title_for(status):
     if status in {"conference_live", "upgrade_pending"}:
-        return "☎️ 3WAY"
+        return f"{PHONE_ICON} 3WAY"
     if status in {"carrier_connected", "dialing_carrier"}:
-        return "☎️ carrier"
+        return f"{PHONE_ICON} carrier"
     if status in {"transfer_received", "close_connected", "waiting_for_transfer"}:
-        return "☎️ LIVE"
+        return f"{PHONE_ICON} LIVE"
     if status == "ended":
-        return "☎️"
-    return "☎️"
+        return PHONE_ICON
+    return PHONE_ICON
 
 
 def fmt_duration(seconds):
@@ -143,7 +157,7 @@ def main():
     cfg = load_config()
     cache = read_cache()
     if not cfg["token"] or cfg["token"].startswith("paste-") or cfg["token"].startswith("change-me"):
-        print("☎️ config")
+        print(f"{PHONE_ICON} config")
         print("---")
         print("Missing FC_MENU_BAR_TOKEN")
         print(f"Create/edit: {CONFIG_PATH}")
@@ -153,14 +167,14 @@ def main():
 
     status, live = api_get("/api/conference/bridge/live", cfg)
     if status == 404:
-        print("☎️")
+        print(PHONE_ICON)
         print("---")
         print("No live bridge found")
         print(action_line("Find Live Bridge", "find-live"))
         print_common(cfg, cache)
         return
     if status != 200:
-        print("☎️ err")
+        print(f"{PHONE_ICON} err")
         print("---")
         print(f"API status: {status}")
         print(swift((live or {}).get("error", "Bridge API error")))
@@ -168,7 +182,7 @@ def main():
         return
 
     if live.get("status") == "ended":
-        print("☎️")
+        print(PHONE_ICON)
         print("---")
         print("No live bridge found")
         print(action_line("Find Live Bridge", "find-live"))
@@ -240,7 +254,7 @@ if __name__ == "__main__":
     try:
         main()
     except Exception as exc:
-        print("☎️ err")
+        print(f"{PHONE_ICON} err")
         print("---")
         print(f"Plugin error: {swift(exc)}")
         sys.exit(0)
