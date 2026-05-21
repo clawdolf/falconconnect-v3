@@ -21,7 +21,7 @@ SYSTEM_CA_FILES = (
     "/etc/ssl/cert.pem",
     "/etc/ssl/certs/ca-certificates.crt",
 )
-PHONE_ICON = "📱"
+PHONE_ICON = "📞︎"
 
 
 def ssl_context():
