@@ -11,7 +11,6 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 from urllib.parse import quote, urlencode
 
-import httpx
 from sqlalchemy import desc, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -695,66 +694,12 @@ async def _finish_session(session: AsyncSession, conf: ConferenceSession, *, log
     conf.ended_at = conf.ended_at or now
     if conf.started_at:
         conf.call_duration_seconds = int((conf.ended_at - conf.started_at).total_seconds())
-    if log_to_close and not conf.close_activity_logged:
-        try:
-            await _log_to_close(conf)
-            conf.close_activity_logged = True
-        except Exception as exc:
-            logger.error("Failed to log bridge call to Close: %s", exc)
-    await session.commit()
-
-
-async def _resolve_lead_id(conf: ConferenceSession) -> str:
-    if conf.lead_id:
-        return conf.lead_id
-    if not conf.lead_phone:
-        return ""
-    settings = get_settings()
-    if not settings.close_api_key:
-        return ""
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(
-                "https://api.close.com/api/v1/lead/",
-                params={"query": f'phone:"{conf.lead_phone}"', "_limit": 1},
-                auth=(settings.close_api_key, ""),
-            )
-            if resp.is_success:
-                leads = resp.json().get("data", [])
-                if leads:
-                    return leads[0].get("id", "")
-    except Exception as exc:
-        logger.warning("Could not resolve Close lead for bridge %s: %s", conf.id, exc)
-    return ""
-
-
-async def _log_to_close(conf: ConferenceSession) -> None:
-    settings = get_settings()
-    if not settings.close_api_key:
-        logger.warning("No CLOSE_API_KEY; skipping Close bridge log")
-        return
-    lead_id = await _resolve_lead_id(conf)
-    if not lead_id:
-        logger.warning("No Close lead id resolved for bridge %s; skipping Close bridge log", conf.id)
-        return
-
-    duration = conf.call_duration_seconds or 0
-    note = (
-        "3 Way Bridge via FalconConnect\n"
-        f"Lead: {conf.lead_phone}\n"
-        f"Carrier: {conf.carrier_phone or 'not added'}\n"
-        f"Duration: {duration}s\n"
-        "Call recordings stay on the native Close call activities."
-    )
-    payload = {"lead_id": lead_id, "note": note}
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        resp = await client.post(
-            "https://api.close.com/api/v1/activity/note/",
-            json=payload,
-            auth=(settings.close_api_key, ""),
+    if log_to_close:
+        logger.info(
+            "Skipping Close note log for bridge %s; native Close call activities carry recordings",
+            conf.id,
         )
-        resp.raise_for_status()
-        logger.info("Logged bridge %s to Close as note activity", conf.id)
+    await session.commit()
 
 
 def _seb_close_number() -> str:
