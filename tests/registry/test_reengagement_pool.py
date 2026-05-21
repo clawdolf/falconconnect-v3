@@ -14,6 +14,7 @@ HAS_AIOSQLITE = importlib.util.find_spec("aiosqlite") is not None
 
 def _rows() -> list[dict]:
     recent = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
+    old = (datetime.now(timezone.utc) - timedelta(days=120)).isoformat()
     return [
         {
             "lead_name": "Eligible Lead",
@@ -48,8 +49,38 @@ def _rows() -> list[dict]:
             "phone": "4805550103",
             "recommended_bucket": "previous-outreach-detected",
             "risk_flags": [],
+            "last_outbound_touch": old,
             "confidence": 0.75,
             "reason": "Old outbound activity exists.",
+        },
+        {
+            "lead_name": "Inbound Responder",
+            "phone": "4805550110",
+            "recommended_bucket": "previous-outreach-detected",
+            "risk_flags": [],
+            "last_outbound_touch": old,
+            "last_inbound_touch": old,
+            "confidence": 0.78,
+            "reason": "Old outbound and inbound reply exists.",
+        },
+        {
+            "lead_name": "Appointment Lead",
+            "phone": "4805550111",
+            "recommended_bucket": "previous-outreach-detected",
+            "risk_flags": [],
+            "last_outbound_touch": old,
+            "last_appointment": old,
+            "confidence": 0.77,
+            "reason": "Appointment exists.",
+        },
+        {
+            "lead_name": "Malformed Outreach",
+            "phone": "4805550112",
+            "recommended_bucket": "previous-outreach-detected",
+            "risk_flags": [],
+            "last_outbound_touch": "unknown",
+            "confidence": 0.76,
+            "reason": "Outbound activity date is malformed.",
         },
         {
             "lead_name": "Dnc Lead",
@@ -120,17 +151,38 @@ def test_pool_maps_buckets_and_masks_contact(tmp_path, monkeypatch):
     eligible = client.get("/api/admin/registry/reengagement/pool?view=eligible")
     assert eligible.status_code == 200, eligible.text
     eligible_rows = eligible.json()
-    assert [row["display_name"] for row in eligible_rows] == ["Eligible Lead"]
+    assert [row["display_name"] for row in eligible_rows] == ["Eligible Lead", "Previous Outreach"]
     assert eligible_rows[0]["bucket"] == "reengage-ready"
+    assert eligible_rows[0]["never_responded"] is True
+    assert eligible_rows[0]["eligibility_reason"] == "reengage-ready-never-responded"
     assert eligible_rows[0]["masked_phone"].startswith("***-***-")
     assert "4805550101" not in eligible.text
     assert "eligible@example.com" not in eligible.text
+    previous = next(row for row in eligible_rows if row["display_name"] == "Previous Outreach")
+    assert previous["bucket"] == "previous-outreach-detected"
+    assert previous["never_responded"] is True
+    assert previous["eligibility_reason"] == "old-outbound-never-responded"
+    assert previous["last_outbound_touch"]
+    assert previous["last_inbound_touch"] is None
+    assert previous["last_appointment"] is None
 
     review = client.get("/api/admin/registry/reengagement/pool?view=needs_review&sort=name")
     assert review.status_code == 200, review.text
     review_names = {row["display_name"] for row in review.json()}
-    assert {"No Phone", "Duplicate Lead", "Previous Outreach"}.issubset(review_names)
-    assert "Previous Outreach" in review_names
+    assert {"Appointment Lead", "Duplicate Lead", "Inbound Responder", "Malformed Outreach", "No Phone"}.issubset(review_names)
+    assert "Previous Outreach" not in review_names
+    malformed = next(row for row in review.json() if row["display_name"] == "Malformed Outreach")
+    assert malformed["never_responded"] is True
+    assert malformed["eligibility_reason"] is None
+    assert malformed["locked_reason"]
+    inbound = next(row for row in review.json() if row["display_name"] == "Inbound Responder")
+    assert inbound["never_responded"] is False
+    assert "inbound_response_detected" in inbound["excluded_reasons"]
+    assert inbound["locked_reason"]
+    appointment = next(row for row in review.json() if row["display_name"] == "Appointment Lead")
+    assert appointment["never_responded"] is False
+    assert "appointment_detected" in appointment["excluded_reasons"]
+    assert appointment["last_appointment"]
 
     locked = client.get("/api/admin/registry/reengagement/pool?view=do_not_touch")
     assert locked.status_code == 200, locked.text
@@ -151,8 +203,8 @@ def test_summary_counts_pools(tmp_path, monkeypatch):
     res = client.get("/api/admin/registry/reengagement/summary")
     assert res.status_code == 200, res.text
     body = res.json()
-    assert body["eligible"] == 1
-    assert body["needs_review"] >= 3
+    assert body["eligible"] == 2
+    assert body["needs_review"] >= 4
     assert body["do_not_touch"] >= 4
     assert body["excluded_recent_or_automated"] >= 2
     assert body["staged_batches"] == 0

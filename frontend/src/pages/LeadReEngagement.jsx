@@ -5,16 +5,16 @@ import { Badge, Empty, RiskBadge, Stat } from '../components/registry/RegistryBa
 
 const API_BASE = '/api/admin/registry'
 const POOLS = [
-  { key: 'eligible', label: 'Eligible Pool' },
+  { key: 'eligible', label: 'Never Responded, Safe' },
   { key: 'needs_review', label: 'Needs Review' },
   { key: 'do_not_touch', label: 'Do Not Touch' },
   { key: 'excluded', label: 'Recent / Automated' },
 ]
 const CHANNELS = [
-  { value: 'sms_only', label: 'SMS only' },
-  { value: 'rvm_only', label: 'RVM only' },
-  { value: 'sms_rvm', label: 'SMS + RVM' },
-  { value: 'export_only', label: 'Export only' },
+  { value: 'export_only', label: 'CSV export only' },
+  { value: 'sms_only', label: 'CSV columns: SMS' },
+  { value: 'rvm_only', label: 'CSV columns: RVM' },
+  { value: 'sms_rvm', label: 'CSV columns: SMS + RVM' },
 ]
 
 function fmtDate(value) {
@@ -32,6 +32,14 @@ function boundedNumber(value, fallback, min, max) {
   return Math.min(max, Math.max(min, parsed))
 }
 
+function evidenceItems(row) {
+  return [
+    row.never_responded ? { label: 'Never responded', tone: 'green' } : null,
+    row.eligibility_reason ? { label: row.eligibility_reason, tone: 'green' } : null,
+    row.last_appointment ? { label: `Last appt ${row.last_appointment}`, tone: 'amber' } : null,
+  ].filter(Boolean)
+}
+
 function PoolTable({ rows }) {
   if (!rows?.length) return <Empty label="No leads in this pool for the current filters." />
   return (
@@ -39,7 +47,7 @@ function PoolTable({ rows }) {
       <table style={{ width: '100%', minWidth: 1080, borderCollapse: 'collapse' }}>
         <thead>
           <tr>
-            {['Lead', 'Risk', 'Masked Contact', 'Bucket', 'Evidence', 'Sources', 'Last Touch'].map((label) => (
+            {['Lead', 'Risk', 'Masked Contact', 'Bucket', 'Safety Evidence', 'Sources', 'Last Touch'].map((label) => (
               <th key={label} style={thStyle}>{label}</th>
             ))}
           </tr>
@@ -66,6 +74,7 @@ function PoolTable({ rows }) {
                 <div style={{ display: 'grid', gap: '0.25rem' }}>
                   <span>{row.reason || '-'}</span>
                   <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap' }}>
+                    {evidenceItems(row).map((item) => <Badge key={item.label} tone={item.tone}>{item.label}</Badge>)}
                     {(row.risk_flags || []).slice(0, 4).map((flag) => <Badge key={flag}>{flag}</Badge>)}
                     {(row.excluded_reasons || []).slice(0, 4).map((reason) => <Badge key={reason} tone="amber">{reason}</Badge>)}
                   </div>
@@ -81,6 +90,7 @@ function PoolTable({ rows }) {
                 <div style={{ display: 'grid', gap: '0.18rem' }}>
                   <span>Out: {row.last_outbound_touch || '-'}</span>
                   <span style={mutedStyle}>In: {row.last_inbound_touch || '-'}</span>
+                  {row.last_appointment && <span style={mutedStyle}>Appt: {row.last_appointment}</span>}
                 </div>
               </td>
             </tr>
@@ -92,13 +102,13 @@ function PoolTable({ rows }) {
 }
 
 function PreviewTable({ rows }) {
-  if (!rows?.length) return <Empty label="No eligible rows selected for this preview." />
+  if (!rows?.length) return <Empty label="No never-responded safe rows selected for this preview." />
   return (
     <div style={{ overflowX: 'auto', borderTop: '1px solid var(--border-subtle)' }}>
-      <table style={{ width: '100%', minWidth: 940, borderCollapse: 'collapse' }}>
+      <table style={{ width: '100%', minWidth: 1080, borderCollapse: 'collapse' }}>
         <thead>
           <tr>
-            {['Lead', 'Masked Phone', 'Risk', 'Bucket', 'Tag', 'Source Ref'].map((label) => <th key={label} style={thStyle}>{label}</th>)}
+            {['Lead', 'Masked Phone', 'Risk', 'Bucket', 'Safety Evidence', 'Tag', 'Source Ref'].map((label) => <th key={label} style={thStyle}>{label}</th>)}
           </tr>
         </thead>
         <tbody>
@@ -108,6 +118,14 @@ function PreviewTable({ rows }) {
               <td style={tdStyle}>{row.masked_phone || '-'}</td>
               <td style={tdStyle}><RiskBadge value={row.risk_level} /></td>
               <td style={tdStyle}>{row.bucket}</td>
+              <td style={tdStyle}>
+                <div style={{ display: 'grid', gap: '0.25rem' }}>
+                  <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap' }}>
+                    {evidenceItems(row).map((item) => <Badge key={item.label} tone={item.tone}>{item.label}</Badge>)}
+                  </div>
+                  <span style={mutedStyle}>In: {row.last_inbound_touch || '-'}</span>
+                </div>
+              </td>
               <td style={tdStyle}><Badge tone="green">{row.proposed_tag}</Badge></td>
               <td style={tdStyle}>{row.source_ref || '-'}</td>
             </tr>
@@ -128,7 +146,7 @@ export default function LeadReEngagement() {
   const [section, setSection] = useState('dashboard')
   const [recentWindow, setRecentWindow] = useState(30)
   const [batchSize, setBatchSize] = useState(50)
-  const [channelMode, setChannelMode] = useState('sms_rvm')
+  const [channelMode, setChannelMode] = useState('export_only')
   const [preview, setPreview] = useState(null)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
@@ -259,7 +277,7 @@ export default function LeadReEngagement() {
       link.click()
       link.remove()
       URL.revokeObjectURL(url)
-      setMessage('CSV export generated locally by FC. No external system was changed.')
+      setMessage('CSV export generated locally by FC. Close, GHL, Twilio, SMS, and RVM were not touched.')
     } catch (err) {
       setError(err.message)
     } finally {
@@ -274,11 +292,12 @@ export default function LeadReEngagement() {
           <div>
             <div style={{ marginBottom: '0.5rem', display: 'flex', gap: '0.45rem', flexWrap: 'wrap' }}>
               <Badge tone="accent">EXPORT ONLY</Badge>
+              <Badge tone="green">Never Responded</Badge>
               <Badge>local projection</Badge>
             </div>
             <h1 style={{ fontFamily: 'var(--font-display)', fontSize: '1.85rem', lineHeight: 1.05, margin: 0 }}>Lead Re-Engagement</h1>
             <p style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: '0.78rem', marginTop: '0.45rem', maxWidth: 780 }}>
-              Build safe old-lead SMS/RVM batches from local Lead Hygiene and Registry evidence.
+              Build a safe never-responded call list from local Lead Hygiene and Registry evidence. CSV export only; this page does not write to Close, GHL, Twilio, SMS, or RVM.
             </p>
           </div>
           <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
@@ -313,7 +332,7 @@ export default function LeadReEngagement() {
       {section === 'dashboard' && (
         <>
           <section className="stats-grid" style={{ marginBottom: '1rem' }}>
-            <Stat label="Eligible Old Leads" value={summary?.eligible} />
+            <Stat label="Never Responded, Safe" value={summary?.eligible} />
             <Stat label="Needs Review" value={summary?.needs_review} />
             <Stat label="Do Not Touch" value={summary?.do_not_touch} />
             <Stat label="Recent / Automated" value={summary?.excluded_recent_or_automated} />
@@ -356,14 +375,17 @@ export default function LeadReEngagement() {
 
       {section === 'campaign' && (
         <section className="section" style={{ marginBottom: '1rem' }}>
-          <div className="section-title">Campaign Builder</div>
+          <div className="section-title">CSV Builder</div>
+          <p style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: '0.76rem', margin: '0 0 0.85rem' }}>
+            Builds a local CSV for Seb to review and call from. Preview and export do not create tasks, tags, notes, messages, RVM drops, or contact updates in Close, GHL, Twilio, or any external system.
+          </p>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: '0.75rem', marginBottom: '0.85rem' }}>
             <label style={fieldStyle}>
               <span style={labelStyle}>Batch size</span>
               <input className="input" type="number" min="1" max="1000" value={batchSize} onChange={(e) => setBatchSize(e.target.value)} />
             </label>
             <label style={fieldStyle}>
-              <span style={labelStyle}>Channel mode</span>
+              <span style={labelStyle}>CSV format</span>
               <select className="input" value={channelMode} onChange={(e) => setChannelMode(e.target.value)}>
                 {CHANNELS.map((channel) => <option key={channel.value} value={channel.value}>{channel.label}</option>)}
               </select>
@@ -374,16 +396,18 @@ export default function LeadReEngagement() {
             </label>
           </div>
           <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
-            <button className="btn-primary" type="button" onClick={runPreview} disabled={loading}>{loading ? 'Previewing...' : 'Preview Batch'}</button>
+            <button className="btn-primary" type="button" onClick={runPreview} disabled={loading}>{loading ? 'Previewing...' : 'Preview CSV'}</button>
             <button className="btn-secondary" type="button" onClick={exportCsv} disabled={loading || !preview?.selected_count}>Export CSV</button>
-            <Badge>no send action</Badge>
+            <Badge>CSV only</Badge>
+            <Badge>no Close write</Badge>
             <Badge>no GHL write</Badge>
+            <Badge>no Twilio / SMS / RVM send</Badge>
           </div>
           {preview && (
             <div style={{ display: 'grid', gap: '1rem' }}>
               <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
                 <Badge tone="green">{preview.selected_count} selected</Badge>
-                <Badge>{preview.total_eligible} eligible</Badge>
+                <Badge>{preview.total_eligible} never responded safe</Badge>
                 <Badge>{preview.channel_mode}</Badge>
                 <Badge tone="green">{preview.proposed_tag}</Badge>
               </div>
@@ -449,11 +473,11 @@ function CopyCard({ label, value }) {
 
 const sectionLabels = {
   dashboard: 'Dashboard',
-  eligible: 'Eligible Pool',
+  eligible: 'Never Responded, Safe',
   needs_review: 'Needs Review',
   do_not_touch: 'Do Not Touch',
   excluded: 'Recent / Automated',
-  campaign: 'Campaign Builder',
+  campaign: 'CSV Builder',
   history: 'History',
   safety: 'Safety / Source Controls',
 }

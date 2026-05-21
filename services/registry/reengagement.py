@@ -37,7 +37,15 @@ NEEDS_REVIEW_BUCKETS = {
     "recently-contacted",
     "already-automated",
 }
-HARD_STOP_FLAGS = {"hard_stop", "stop_language", "sms_opt_out", "dnc_language"}
+HARD_STOP_FLAGS = {
+    "hard_stop",
+    "stop_language",
+    "sms_opt_out",
+    "dnc_language",
+    "not_interested_status",
+    "client_status",
+    "invalid_status",
+}
 REVIEW_FLAGS = {"missing_phone", "duplicate_phone", "ambiguous_match"}
 AUTOMATION_FLAGS = {"ghl_workflow_detected", "rvm_tag_detected"}
 
@@ -63,6 +71,9 @@ class ReengagementRow:
     latest_seen_at: Optional[datetime]
     last_outbound_touch: Optional[str]
     last_inbound_touch: Optional[str]
+    last_appointment: Optional[str]
+    never_responded: bool
+    eligibility_reason: Optional[str]
     risk_flags: list[str]
     reason: Optional[str]
     excluded_reasons: list[str]
@@ -89,6 +100,9 @@ class ReengagementRow:
             "latest_seen_at": self.latest_seen_at,
             "last_outbound_touch": self.last_outbound_touch,
             "last_inbound_touch": self.last_inbound_touch,
+            "last_appointment": self.last_appointment,
+            "never_responded": self.never_responded,
+            "eligibility_reason": self.eligibility_reason,
             "risk_flags": self.risk_flags,
             "reason": self.reason,
             "excluded_reasons": self.excluded_reasons,
@@ -193,8 +207,9 @@ async def campaign_preview(
         "source_ref": source_ref or _latest_source_ref(selected),
         "copy_preview": copy_preview(),
         "confirmation_copy": (
-            f"Future release would require confirming exactly {len(selected)} leads. "
-            "MVP is export-only and will not send SMS, trigger RVM, or retag GHL."
+            f"CSV export contains exactly {len(selected)} leads. "
+            "FC will not send SMS, trigger RVM, retag GHL, write Close notes, create tasks, "
+            "or update any external system."
         ),
     }
 
@@ -223,6 +238,11 @@ async def export_rows(
                 "proposed_tag": PROPOSED_TAG,
                 "channel_mode": channel_mode,
                 "batch_source_reference": row.source_ref or "",
+                "last_outbound_touch": row.last_outbound_touch or "",
+                "last_inbound_touch": row.last_inbound_touch or "",
+                "last_appointment": row.last_appointment or "",
+                "eligibility_reason": row.eligibility_reason or "",
+                "never_responded": row.never_responded,
             }
         )
     return export, preview
@@ -290,15 +310,33 @@ def _row_from_household(
     email = payload.get("email") or household.primary_email
     display_name = payload.get("lead_name") or payload.get("name") or household.display_name
     first_name, last_name = _split_name(display_name)
+    last_outbound_touch = payload.get("last_outbound_touch")
+    last_inbound_touch = payload.get("last_inbound_touch")
+    last_appointment = payload.get("last_appointment")
+    risk_level = str((rec.risk_level if rec is not None else None) or household.risk_level or "unknown")
     excluded = _exclusion_reasons(
         bucket=bucket,
         flags=flags,
         phone=phone,
-        risk_level=str((rec.risk_level if rec is not None else None) or household.risk_level or "unknown"),
-        last_outbound_touch=payload.get("last_outbound_touch"),
+        risk_level=risk_level,
+        last_outbound_touch=last_outbound_touch,
+        last_inbound_touch=last_inbound_touch,
+        last_appointment=last_appointment,
         recent_window_days=recent_window_days,
     )
-    pool_name = _pool_name(bucket=bucket, excluded_reasons=excluded)
+    old_outbound_verified = _has_verified_old_outbound(last_outbound_touch, recent_window_days)
+    pool_name = _pool_name(
+        bucket=bucket,
+        excluded_reasons=excluded,
+        old_outbound_verified=old_outbound_verified,
+    )
+    never_responded = not bool(last_inbound_touch or last_appointment)
+    eligibility_reason = _eligibility_reason(
+        bucket=bucket,
+        pool_name=pool_name,
+        old_outbound_verified=old_outbound_verified,
+        never_responded=never_responded,
+    )
     sources = _sources(household, payload)
     return ReengagementRow(
         household_id=household.id,
@@ -309,7 +347,7 @@ def _row_from_household(
         last_name=last_name,
         phone=phone,
         email=email,
-        risk_level=str((rec.risk_level if rec is not None else None) or household.risk_level or "unknown"),
+        risk_level=risk_level,
         confidence=(rec.confidence if rec is not None else household.confidence),
         bucket=bucket,
         pool=pool_name,
@@ -318,8 +356,11 @@ def _row_from_household(
         ghl_contact_id=payload.get("ghl_contact_id") or _external_id(household, "ghl"),
         source_ref=snapshot.source_ref if snapshot else None,
         latest_seen_at=snapshot.created_at if snapshot else household.updated_at,
-        last_outbound_touch=payload.get("last_outbound_touch"),
-        last_inbound_touch=payload.get("last_inbound_touch"),
+        last_outbound_touch=last_outbound_touch,
+        last_inbound_touch=last_inbound_touch,
+        last_appointment=last_appointment,
+        never_responded=never_responded,
+        eligibility_reason=eligibility_reason,
         risk_flags=flags,
         reason=payload.get("reason") or evidence.get("reason"),
         excluded_reasons=excluded,
@@ -334,6 +375,8 @@ def _exclusion_reasons(
     phone: Optional[str],
     risk_level: str,
     last_outbound_touch: Optional[str],
+    last_inbound_touch: Optional[str],
+    last_appointment: Optional[str],
     recent_window_days: int,
 ) -> list[str]:
     reasons: list[str] = []
@@ -343,8 +386,12 @@ def _exclusion_reasons(
         reasons.append("missing_phone")
     if bucket_l in DO_NOT_TOUCH_BUCKETS or flag_set.intersection(HARD_STOP_FLAGS):
         reasons.append("hard_stop_or_do_not_touch")
-    if bucket_l in {"duplicate", "needs-review", "previous-outreach-detected"} or flag_set.intersection(REVIEW_FLAGS):
+    if bucket_l in {"duplicate", "needs-review"} or flag_set.intersection(REVIEW_FLAGS):
         reasons.append("needs_review")
+    if last_inbound_touch or "inbound_response_detected" in flag_set:
+        reasons.append("inbound_response_detected")
+    if last_appointment or "appointment_detected" in flag_set:
+        reasons.append("appointment_detected")
     if bucket_l == "recently-contacted" or _is_recent(last_outbound_touch, recent_window_days):
         reasons.append("recent_outbound_touch")
     if bucket_l == "already-automated" or flag_set.intersection(AUTOMATION_FLAGS):
@@ -354,19 +401,42 @@ def _exclusion_reasons(
     return sorted(set(reasons))
 
 
-def _pool_name(*, bucket: str, excluded_reasons: list[str]) -> str:
+def _pool_name(*, bucket: str, excluded_reasons: list[str], old_outbound_verified: bool) -> str:
     bucket_l = bucket.lower()
     if "hard_stop_or_do_not_touch" in excluded_reasons or bucket_l in DO_NOT_TOUCH_BUCKETS:
         return "do_not_touch"
-    if bucket_l in {"recently-contacted", "already-automated"}:
+    if (
+        bucket_l in {"recently-contacted", "already-automated"}
+        or "recent_outbound_touch" in excluded_reasons
+        or "active_automation" in excluded_reasons
+    ):
         return "excluded"
     if excluded_reasons:
         return "needs_review"
     if bucket_l == "reengage-ready":
         return "eligible"
+    if bucket_l == "previous-outreach-detected" and old_outbound_verified:
+        return "eligible"
     if bucket_l in NEEDS_REVIEW_BUCKETS:
         return "needs_review"
     return "needs_review"
+
+
+def _eligibility_reason(
+    *,
+    bucket: str,
+    pool_name: str,
+    old_outbound_verified: bool,
+    never_responded: bool,
+) -> Optional[str]:
+    if pool_name != "eligible" or not never_responded:
+        return None
+    bucket_l = bucket.lower()
+    if bucket_l == "reengage-ready":
+        return "reengage-ready-never-responded"
+    if bucket_l == "previous-outreach-detected" and old_outbound_verified:
+        return "old-outbound-never-responded"
+    return None
 
 
 def _filter_rows(
@@ -438,16 +508,30 @@ def _public_row_key(row: dict[str, Any]) -> tuple[int, Optional[int], Optional[i
     )
 
 
-def _is_recent(value: Optional[str], recent_window_days: int) -> bool:
+def _parse_touch_datetime(value: Optional[str]) -> Optional[datetime]:
     if not value:
-        return False
+        return None
     try:
         parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
     except ValueError:
-        return False
+        return None
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def _is_recent(value: Optional[str], recent_window_days: int) -> bool:
+    parsed = _parse_touch_datetime(value)
+    if parsed is None:
+        return False
     return parsed >= datetime.now(timezone.utc) - timedelta(days=recent_window_days)
+
+
+def _has_verified_old_outbound(value: Optional[str], recent_window_days: int) -> bool:
+    parsed = _parse_touch_datetime(value)
+    if parsed is None:
+        return False
+    return parsed < datetime.now(timezone.utc) - timedelta(days=recent_window_days)
 
 
 def _split_name(display_name: str, first_name: Optional[str] = None, last_name: Optional[str] = None) -> tuple[Optional[str], Optional[str]]:

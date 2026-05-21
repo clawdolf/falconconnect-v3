@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class RegistryHouseholdOut(BaseModel):
@@ -235,6 +235,9 @@ class ReengagementPoolRow(BaseModel):
     latest_seen_at: Optional[datetime] = None
     last_outbound_touch: Optional[str] = None
     last_inbound_touch: Optional[str] = None
+    last_appointment: Optional[str] = None
+    never_responded: bool = False
+    eligibility_reason: Optional[str] = None
     risk_flags: list[str] = []
     reason: Optional[str] = None
     excluded_reasons: list[str] = []
@@ -248,8 +251,8 @@ class ReengagementCampaignPreviewRequest(BaseModel):
     risk: Optional[str] = None
     bucket: Optional[str] = None
     source_ref: Optional[str] = None
-    recent_window_days: int = 30
-    batch_size: int = 50
+    recent_window_days: int = Field(default=30, ge=1, le=365)
+    batch_size: int = Field(default=50, ge=1, le=1000)
     channel_mode: str = "sms_rvm"
     sort: str = "rank"
 

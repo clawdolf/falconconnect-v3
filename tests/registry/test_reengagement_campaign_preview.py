@@ -34,8 +34,15 @@ def test_preview_enforces_cap_and_returns_exclusion_counts(tmp_path, monkeypatch
         "/api/admin/registry/reengagement/campaign-preview",
         json={"batch_size": 1001, "channel_mode": "sms_only"},
     )
-    assert too_large.status_code == 400
+    assert too_large.status_code == 422
     assert "batch_size" in too_large.text
+
+    invalid_window = client.post(
+        "/api/admin/registry/reengagement/campaign-preview",
+        json={"recent_window_days": 0, "channel_mode": "sms_only"},
+    )
+    assert invalid_window.status_code == 422
+    assert "recent_window_days" in invalid_window.text
 
     res = client.post(
         "/api/admin/registry/reengagement/campaign-preview",
@@ -43,17 +50,22 @@ def test_preview_enforces_cap_and_returns_exclusion_counts(tmp_path, monkeypatch
     )
     assert res.status_code == 200, res.text
     body = res.json()
-    assert body["selected_count"] == 1
-    assert body["total_eligible"] == 1
+    assert body["selected_count"] == 2
+    assert body["total_eligible"] == 2
     assert body["rows"][0]["display_name"] == "Eligible Lead"
+    assert {row["display_name"] for row in body["rows"]} == {"Eligible Lead", "Previous Outreach"}
     assert body["rows"][0]["masked_phone"].startswith("***-***-")
     assert body["channel_mode"] == "sms_only"
     assert body["proposed_tag"] == "reengage-staging"
     assert body["copy_preview"]["sms_opener"].startswith("Hey {first_name}")
-    assert "release would require confirming exactly 1 leads" in body["confirmation_copy"]
+    assert "CSV export contains exactly 2 leads" in body["confirmation_copy"]
+    assert "will not send SMS" in body["confirmation_copy"]
+    assert "update any external system" in body["confirmation_copy"]
     assert body["excluded_counts"]["hard_stop_or_do_not_touch"] >= 4
     assert body["excluded_counts"]["missing_phone"] >= 1
-    assert body["excluded_counts"]["needs_review"] >= 3
+    assert body["excluded_counts"]["needs_review"] >= 2
+    assert body["excluded_counts"]["inbound_response_detected"] >= 1
+    assert body["excluded_counts"]["appointment_detected"] >= 1
 
 
 @pytest.mark.skipif(not HAS_AIOSQLITE, reason="aiosqlite is not installed")
@@ -83,7 +95,7 @@ def test_export_contains_only_eligible_rows_and_staging_tag(tmp_path, monkeypatc
     assert res.status_code == 200, res.text
     assert res.headers["content-type"].startswith("text/csv")
     rows = list(csv.DictReader(io.StringIO(res.text)))
-    assert len(rows) == 1
+    assert len(rows) == 2
     assert rows[0]["first_name"] == "Eligible"
     assert rows[0]["last_name"] == "Lead"
     assert rows[0]["phone"].endswith("0101")
@@ -92,8 +104,17 @@ def test_export_contains_only_eligible_rows_and_staging_tag(tmp_path, monkeypatc
     assert rows[0]["ghl_contact_id"] == "ghl_eligible"
     assert rows[0]["proposed_tag"] == "reengage-staging"
     assert rows[0]["channel_mode"] == "sms_rvm"
+    assert rows[0]["eligibility_reason"] == "reengage-ready-never-responded"
+    assert rows[0]["never_responded"] == "True"
+    previous = next(row for row in rows if row["first_name"] == "Previous")
+    assert previous["last_outbound_touch"]
+    assert previous["last_inbound_touch"] == ""
+    assert previous["last_appointment"] == ""
+    assert previous["eligibility_reason"] == "old-outbound-never-responded"
+    assert previous["never_responded"] == "True"
     assert "Dnc Lead" not in res.text
-    assert "Previous Outreach" not in res.text
+    assert "Inbound Responder" not in res.text
+    assert "Appointment Lead" not in res.text
 
 
 @pytest.mark.skipif(not HAS_AIOSQLITE, reason="aiosqlite is not installed")

@@ -274,6 +274,11 @@ async def export_reengagement_campaign(
         "proposed_tag",
         "channel_mode",
         "batch_source_reference",
+        "last_outbound_touch",
+        "last_inbound_touch",
+        "last_appointment",
+        "eligibility_reason",
+        "never_responded",
     ]
     writer = csv.DictWriter(out, fieldnames=fieldnames)
     writer.writeheader()
