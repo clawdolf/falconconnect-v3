@@ -5,13 +5,15 @@ REPO_RAW="https://raw.githubusercontent.com/clawdolf/falconnect/main/scripts/swi
 PLUGIN_DIR="$HOME/Library/Application Support/SwiftBar/Plugins"
 CONFIG_DIR="$HOME/.config/falconconnect"
 CONFIG_FILE="$CONFIG_DIR/bridge.env"
+ACTION_DIR="$HOME/.local/share/falconconnect"
 APPDIR="$HOME/Applications"
 
-mkdir -p "$PLUGIN_DIR" "$CONFIG_DIR" "$APPDIR"
+mkdir -p "$PLUGIN_DIR" "$CONFIG_DIR" "$ACTION_DIR" "$APPDIR"
 
 curl -fsSL "$REPO_RAW/fc-bridge.5s.py" -o "$PLUGIN_DIR/fc-bridge.5s.py"
-curl -fsSL "$REPO_RAW/fc-bridge-action.py" -o "$PLUGIN_DIR/fc-bridge-action.py"
-chmod +x "$PLUGIN_DIR/fc-bridge.5s.py" "$PLUGIN_DIR/fc-bridge-action.py"
+curl -fsSL "$REPO_RAW/fc-bridge-action.py" -o "$ACTION_DIR/fc-bridge-action.py"
+rm -f "$PLUGIN_DIR/fc-bridge-action.py"
+chmod +x "$PLUGIN_DIR/fc-bridge.5s.py" "$ACTION_DIR/fc-bridge-action.py"
 
 if [ -n "${FC_MENU_BAR_TOKEN:-}" ]; then
   cat > "$CONFIG_FILE" <<EOF
@@ -42,6 +44,7 @@ fi
 cat <<EOF
 Installed FalconConnect SwiftBar bridge controls for $USER.
 Plugin: $PLUGIN_DIR/fc-bridge.5s.py
+Action helper: $ACTION_DIR/fc-bridge-action.py
 Config: $CONFIG_FILE
 If SwiftBar asks for a plugin folder, choose:
 $PLUGIN_DIR

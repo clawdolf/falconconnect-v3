@@ -4,12 +4,14 @@ set -euo pipefail
 PLUGIN_DIR="$HOME/Library/Application Support/SwiftBar/Plugins"
 CONFIG_DIR="$HOME/.config/falconconnect"
 CONFIG_FILE="$CONFIG_DIR/bridge.env"
+ACTION_DIR="$HOME/.local/share/falconconnect"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-mkdir -p "$PLUGIN_DIR" "$CONFIG_DIR"
+mkdir -p "$PLUGIN_DIR" "$CONFIG_DIR" "$ACTION_DIR"
 cp "$SCRIPT_DIR/fc-bridge.5s.py" "$PLUGIN_DIR/fc-bridge.5s.py"
-cp "$SCRIPT_DIR/fc-bridge-action.py" "$PLUGIN_DIR/fc-bridge-action.py"
-chmod +x "$PLUGIN_DIR/fc-bridge.5s.py" "$PLUGIN_DIR/fc-bridge-action.py"
+cp "$SCRIPT_DIR/fc-bridge-action.py" "$ACTION_DIR/fc-bridge-action.py"
+rm -f "$PLUGIN_DIR/fc-bridge-action.py"
+chmod +x "$PLUGIN_DIR/fc-bridge.5s.py" "$ACTION_DIR/fc-bridge-action.py"
 
 if [ ! -f "$CONFIG_FILE" ]; then
   cat > "$CONFIG_FILE" <<'EOF'
@@ -25,7 +27,7 @@ Installed FalconConnect SwiftBar bridge controls.
 Plugin:
   $PLUGIN_DIR/fc-bridge.5s.py
 Action helper:
-  $PLUGIN_DIR/fc-bridge-action.py
+  $ACTION_DIR/fc-bridge-action.py
 Config:
   $CONFIG_FILE
 

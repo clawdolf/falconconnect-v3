@@ -13,6 +13,7 @@ CONFIG_PATH = Path.home() / ".config" / "falconconnect" / "bridge.env"
 CACHE_DIR = Path.home() / ".cache" / "falconconnect"
 CACHE_PATH = CACHE_DIR / "bridge.json"
 ERROR_PATH = CACHE_DIR / "bridge-error.txt"
+ACTION_HELPER_PATH = Path.home() / ".local" / "share" / "falconconnect" / "fc-bridge-action.py"
 DEFAULT_BASE_URL = "https://falconnect.org"
 
 
@@ -82,7 +83,7 @@ def api_get(path, cfg):
 
 
 def action_line(label, action, *params):
-    helper = Path(__file__).with_name("fc-bridge-action.py")
+    helper = ACTION_HELPER_PATH if ACTION_HELPER_PATH.exists() else Path(__file__).with_name("fc-bridge-action.py")
     parts = [
         f"{swift(label)} | bash={attr_path(helper)}",
         f"param1={action}",
@@ -95,14 +96,14 @@ def action_line(label, action, *params):
 
 def title_for(status):
     if status in {"conference_live", "upgrade_pending"}:
-        return "FC Bridge: 3WAY"
+        return "☎️ 3WAY"
     if status in {"carrier_connected", "dialing_carrier"}:
-        return "FC Bridge: carrier"
+        return "☎️ carrier"
     if status in {"transfer_received", "close_connected", "waiting_for_transfer"}:
-        return "FC Bridge: LIVE"
+        return "☎️ LIVE"
     if status == "ended":
-        return "FC Bridge: idle"
-    return "FC Bridge: idle"
+        return "☎️"
+    return "☎️"
 
 
 def fmt_duration(seconds):
@@ -142,7 +143,7 @@ def main():
     cfg = load_config()
     cache = read_cache()
     if not cfg["token"] or cfg["token"].startswith("paste-") or cfg["token"].startswith("change-me"):
-        print("FC Bridge: config")
+        print("☎️ config")
         print("---")
         print("Missing FC_MENU_BAR_TOKEN")
         print(f"Create/edit: {CONFIG_PATH}")
@@ -152,14 +153,14 @@ def main():
 
     status, live = api_get("/api/conference/bridge/live", cfg)
     if status == 404:
-        print("FC Bridge: idle")
+        print("☎️")
         print("---")
         print("No live bridge found")
         print(action_line("Find Live Bridge", "find-live"))
         print_common(cfg, cache)
         return
     if status != 200:
-        print("FC Bridge: err")
+        print("☎️ err")
         print("---")
         print(f"API status: {status}")
         print(swift((live or {}).get("error", "Bridge API error")))
@@ -167,7 +168,7 @@ def main():
         return
 
     if live.get("status") == "ended":
-        print("FC Bridge: idle")
+        print("☎️")
         print("---")
         print("No live bridge found")
         print(action_line("Find Live Bridge", "find-live"))
@@ -239,7 +240,7 @@ if __name__ == "__main__":
     try:
         main()
     except Exception as exc:
-        print("FC Bridge: err")
+        print("☎️ err")
         print("---")
         print(f"Plugin error: {swift(exc)}")
         sys.exit(0)
